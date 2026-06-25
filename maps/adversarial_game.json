@@ -1,0 +1,33 @@
+{
+  "name": "Trò chơi đối kháng (Minimax/Alpha-Beta/Expectimax)",
+  "description": "8 node. Hacker và Defender luân phiên. Depth 3-4 chạy mượt. Mỗi lượt có 2-3 hành động hợp lệ.",
+  "hacker_start": "PC1",
+  "goal_nodes": ["Server", "Database"],
+  "nodes": [
+    {"id": "PC1",     "kind": "pc",       "position": [100, 300], "security_level": 2,  "zone": "User Zone",   "blocked": false, "visible": true, "compromised": true,  "monitored": false, "importance": 3, "detection_risk": 0.0},
+    {"id": "Switch",  "kind": "switch",   "position": [270, 180], "security_level": 4,  "zone": "DMZ",         "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 5, "detection_risk": 0.2},
+    {"id": "Router",  "kind": "router",   "position": [270, 420], "security_level": 5,  "zone": "DMZ",         "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 6, "detection_risk": 0.3},
+    {"id": "IDS",     "kind": "ids",      "position": [450, 300], "security_level": 7,  "zone": "DMZ",         "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 8, "detection_risk": 0.9},
+    {"id": "Firewall","kind": "firewall", "position": [620, 180], "security_level": 9,  "zone": "Server Zone", "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 9, "detection_risk": 0.6},
+    {"id": "Switch2", "kind": "switch",   "position": [620, 420], "security_level": 4,  "zone": "Server Zone", "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 5, "detection_risk": 0.2},
+    {"id": "Server",  "kind": "server",   "position": [800, 265], "security_level": 10, "zone": "Server Zone", "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 10,"detection_risk": 1.0},
+    {"id": "Database","kind": "database", "position": [800, 420], "security_level": 10, "zone": "Server Zone", "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 10,"detection_risk": 1.0}
+  ],
+  "edges": [
+    {"source": "PC1",    "target": "Switch",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "PC1",    "target": "Router",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch", "target": "IDS",      "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Router", "target": "IDS",      "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "IDS",    "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "IDS",    "target": "Switch2",  "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Firewall","target":"Server",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch2","target": "Database", "base_cost": 1.0, "blocked": false, "bidirectional": true}
+  ],
+  "metadata": {
+    "group": "adversarial",
+    "max_turns": 10,
+    "ids_detect_prob": 0.7,
+    "firewall_block_prob": 0.8,
+    "notes": "Hacker bắt đầu ở PC1. Defender có thể block Switch, Router, hoặc upgrade security. Có IDS với xác suất phát hiện 70% cho Expectimax."
+  }
+}

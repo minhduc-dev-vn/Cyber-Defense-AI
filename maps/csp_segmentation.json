@@ -1,0 +1,38 @@
+{
+  "name": "Phân vùng CSP (Backtracking/FC/Min-Conflicts)",
+  "description": "8 node cần gán Security Zone. Ràng buộc: Server != User Zone, Database = Server Zone, node nhiễm = Quarantine Zone.",
+  "hacker_start": "PC1",
+  "goal_nodes": ["Server"],
+  "nodes": [
+    {"id": "PC1",      "kind": "pc",       "position": [100, 200], "security_level": 2,  "zone": null, "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 3, "detection_risk": 0.1},
+    {"id": "PC2",      "kind": "pc",       "position": [100, 400], "security_level": 2,  "zone": null, "blocked": false, "visible": true, "compromised": true,  "monitored": false, "importance": 3, "detection_risk": 0.1},
+    {"id": "Switch",   "kind": "switch",   "position": [290, 300], "security_level": 4,  "zone": null, "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 5, "detection_risk": 0.2},
+    {"id": "Router",   "kind": "router",   "position": [480, 200], "security_level": 6,  "zone": null, "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 7, "detection_risk": 0.3},
+    {"id": "DMZ_Node", "kind": "router",   "position": [480, 400], "security_level": 5,  "zone": null, "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 6, "detection_risk": 0.25},
+    {"id": "Firewall", "kind": "firewall", "position": [660, 300], "security_level": 9,  "zone": null, "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 9, "detection_risk": 0.6},
+    {"id": "Server",   "kind": "server",   "position": [840, 200], "security_level": 10, "zone": null, "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 10,"detection_risk": 1.0},
+    {"id": "Database", "kind": "database", "position": [840, 400], "security_level": 10, "zone": null, "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 10,"detection_risk": 1.0}
+  ],
+  "edges": [
+    {"source": "PC1",      "target": "Switch",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "PC2",      "target": "Switch",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch",   "target": "Router",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch",   "target": "DMZ_Node", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Router",   "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "DMZ_Node", "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Firewall", "target": "Server",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Firewall", "target": "Database", "base_cost": 1.0, "blocked": false, "bidirectional": true}
+  ],
+  "metadata": {
+    "group": "csp",
+    "zones": ["User Zone", "DMZ", "Server Zone", "Quarantine Zone"],
+    "constraints": [
+      "Server phải thuộc Server Zone",
+      "Database phải thuộc Server Zone",
+      "PC2 (nhiễm) phải thuộc Quarantine Zone",
+      "PC1 (user) không được cùng zone với Server",
+      "Node kề với Server không được thuộc User Zone nếu là pc"
+    ],
+    "notes": "Có ràng buộc đủ để thấy khác biệt giữa 3 thuật toán CSP."
+  }
+}

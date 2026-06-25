@@ -1,0 +1,31 @@
+{
+  "name": "Quan sát một phần (Belief Partial)",
+  "description": "Có 1 IDS quan sát. Node ngoài vùng quan sát hiển thị '?'. Quan sát thu hẹp belief state.",
+  "hacker_start": "PC1",
+  "goal_nodes": ["Server"],
+  "nodes": [
+    {"id": "PC1",     "kind": "pc",     "position": [100, 180], "security_level": 2, "zone": "User Zone",   "blocked": false, "visible": false, "compromised": false, "monitored": false, "importance": 3, "detection_risk": 0.0},
+    {"id": "PC2",     "kind": "pc",     "position": [100, 360], "security_level": 2, "zone": "User Zone",   "blocked": false, "visible": false, "compromised": false, "monitored": false, "importance": 3, "detection_risk": 0.0},
+    {"id": "Switch",  "kind": "switch", "position": [300, 270], "security_level": 4, "zone": "DMZ",         "blocked": false, "visible": false, "compromised": false, "monitored": false, "importance": 5, "detection_risk": 0.2},
+    {"id": "IDS",     "kind": "ids",    "position": [480, 180], "security_level": 7, "zone": "DMZ",         "blocked": false, "visible": true,  "compromised": false, "monitored": true,  "importance": 8, "detection_risk": 0.9},
+    {"id": "Router",  "kind": "router", "position": [480, 380], "security_level": 5, "zone": "DMZ",         "blocked": false, "visible": true,  "compromised": false, "monitored": false, "importance": 6, "detection_risk": 0.3},
+    {"id": "Firewall","kind": "firewall","position":[660, 270], "security_level": 9, "zone": "Server Zone", "blocked": false, "visible": true,  "compromised": false, "monitored": true,  "importance": 9, "detection_risk": 0.6},
+    {"id": "Server",  "kind": "server", "position": [840, 270], "security_level": 10,"zone": "Server Zone", "blocked": false, "visible": true,  "compromised": false, "monitored": true,  "importance": 10,"detection_risk": 1.0}
+  ],
+  "edges": [
+    {"source": "PC1",    "target": "Switch",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "PC2",    "target": "Switch",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch", "target": "IDS",      "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch", "target": "Router",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "IDS",    "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Router", "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Firewall","target":"Server",   "base_cost": 1.0, "blocked": false, "bidirectional": true}
+  ],
+  "metadata": {
+    "group": "complex_environment",
+    "ids_node": "IDS",
+    "ids_observation_radius": 1,
+    "belief_initial": ["PC1", "PC2"],
+    "notes": "IDS quan sát IDS và Switch (radius 1). Nếu phát hiện suspicious activity ở Switch thì belief thu hẹp."
+  }
+}

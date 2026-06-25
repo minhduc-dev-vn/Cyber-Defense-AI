@@ -1,0 +1,29 @@
+{
+  "name": "Ẩn hoàn toàn (Belief Unobservable)",
+  "description": "Hacker có thể ở 3 node khác nhau. Defender không thấy gì. Phải tìm kế hoạch chặn tất cả đường tới Server.",
+  "hacker_start": "PC1",
+  "goal_nodes": ["Server"],
+  "nodes": [
+    {"id": "PC1",     "kind": "pc",     "position": [100, 200], "security_level": 2, "zone": "User Zone",   "blocked": false, "visible": false, "compromised": false, "monitored": false, "importance": 3, "detection_risk": 0.0},
+    {"id": "PC2",     "kind": "pc",     "position": [100, 380], "security_level": 2, "zone": "User Zone",   "blocked": false, "visible": false, "compromised": false, "monitored": false, "importance": 3, "detection_risk": 0.0},
+    {"id": "PC3",     "kind": "pc",     "position": [100, 520], "security_level": 2, "zone": "User Zone",   "blocked": false, "visible": false, "compromised": false, "monitored": false, "importance": 3, "detection_risk": 0.0},
+    {"id": "Router",  "kind": "router", "position": [340, 300], "security_level": 5, "zone": "DMZ",         "blocked": false, "visible": true,  "compromised": false, "monitored": false, "importance": 6, "detection_risk": 0.3},
+    {"id": "Switch",  "kind": "switch", "position": [340, 480], "security_level": 4, "zone": "DMZ",         "blocked": false, "visible": true,  "compromised": false, "monitored": false, "importance": 5, "detection_risk": 0.2},
+    {"id": "Firewall","kind": "firewall","position":[560, 380], "security_level": 9, "zone": "Server Zone", "blocked": false, "visible": true,  "compromised": false, "monitored": true,  "importance": 9, "detection_risk": 0.6},
+    {"id": "Server",  "kind": "server", "position": [760, 300], "security_level": 10,"zone": "Server Zone", "blocked": false, "visible": true,  "compromised": false, "monitored": true,  "importance": 10,"detection_risk": 1.0}
+  ],
+  "edges": [
+    {"source": "PC1",    "target": "Router",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "PC2",    "target": "Router",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "PC2",    "target": "Switch",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "PC3",    "target": "Switch",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Router", "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch", "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Firewall","target":"Server",   "base_cost": 1.0, "blocked": false, "bidirectional": true}
+  ],
+  "metadata": {
+    "group": "complex_environment",
+    "belief_initial": ["PC1", "PC2", "PC3"],
+    "notes": "Belief ban đầu = {PC1, PC2, PC3}. Defender phải chặn cả Router và Switch để ngăn mọi đường tới Server."
+  }
+}

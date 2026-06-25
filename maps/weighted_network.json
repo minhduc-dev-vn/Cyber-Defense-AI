@@ -1,0 +1,140 @@
+{
+  "name": "Mạng có trọng số (UCS/A*/IDA*)",
+  "description": "Có 2 đường tới Server: đường ngắn bước nhưng chi phí cao, đường nhiều bước nhưng chi phí thấp. UCS/A*/IDA* chọn đường cost thấp.",
+  "hacker_start": "Hacker",
+  "goal_nodes": ["Server", "Database"],
+  "nodes": [
+    {
+      "id": "Hacker",
+      "kind": "pc",
+      "position": [100, 300],
+      "security_level": 1,
+      "zone": "User Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": true,
+      "monitored": false,
+      "importance": 1,
+      "detection_risk": 0.0
+    },
+    {
+      "id": "PC_A",
+      "kind": "pc",
+      "position": [280, 150],
+      "security_level": 3,
+      "zone": "User Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 3,
+      "detection_risk": 0.1
+    },
+    {
+      "id": "Router_A",
+      "kind": "router",
+      "position": [460, 150],
+      "security_level": 8,
+      "zone": "DMZ",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 7,
+      "detection_risk": 0.5
+    },
+    {
+      "id": "Switch_B",
+      "kind": "switch",
+      "position": [280, 350],
+      "security_level": 2,
+      "zone": "User Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 4,
+      "detection_risk": 0.15
+    },
+    {
+      "id": "PC_B",
+      "kind": "pc",
+      "position": [460, 440],
+      "security_level": 2,
+      "zone": "User Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 3,
+      "detection_risk": 0.1
+    },
+    {
+      "id": "Switch_C",
+      "kind": "switch",
+      "position": [620, 350],
+      "security_level": 3,
+      "zone": "DMZ",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 5,
+      "detection_risk": 0.2
+    },
+    {
+      "id": "Firewall",
+      "kind": "firewall",
+      "position": [620, 200],
+      "security_level": 9,
+      "zone": "Server Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": true,
+      "importance": 9,
+      "detection_risk": 0.6
+    },
+    {
+      "id": "Server",
+      "kind": "server",
+      "position": [820, 265],
+      "security_level": 10,
+      "zone": "Server Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": true,
+      "importance": 10,
+      "detection_risk": 1.0
+    },
+    {
+      "id": "Database",
+      "kind": "database",
+      "position": [820, 440],
+      "security_level": 10,
+      "zone": "Server Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": true,
+      "importance": 10,
+      "detection_risk": 1.0
+    }
+  ],
+  "edges": [
+    {"source": "Hacker",   "target": "PC_A",     "base_cost": 1.0,  "blocked": false, "bidirectional": true},
+    {"source": "Hacker",   "target": "Switch_B",  "base_cost": 1.0,  "blocked": false, "bidirectional": true},
+    {"source": "PC_A",     "target": "Router_A",  "base_cost": 2.0,  "blocked": false, "bidirectional": true},
+    {"source": "Router_A", "target": "Firewall",  "base_cost": 2.0,  "blocked": false, "bidirectional": true},
+    {"source": "Switch_B", "target": "PC_B",      "base_cost": 1.0,  "blocked": false, "bidirectional": true},
+    {"source": "PC_B",     "target": "Switch_C",  "base_cost": 1.0,  "blocked": false, "bidirectional": true},
+    {"source": "Switch_C", "target": "Firewall",  "base_cost": 1.0,  "blocked": false, "bidirectional": true},
+    {"source": "Switch_C", "target": "Database",  "base_cost": 2.0,  "blocked": false, "bidirectional": true},
+    {"source": "Firewall", "target": "Server",    "base_cost": 1.0,  "blocked": false, "bidirectional": true}
+  ],
+  "metadata": {
+    "group": "informed",
+    "notes": "Đường ngắn: Hacker→PC_A→Router_A→Firewall→Server (4 bước, cost cao vì security_level). Đường dài nhưng rẻ hơn: Hacker→Switch_B→PC_B→Switch_C→Firewall→Server."
+  }
+}

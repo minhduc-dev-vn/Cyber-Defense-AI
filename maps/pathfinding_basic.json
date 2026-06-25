@@ -1,0 +1,127 @@
+{
+  "name": "Bản đồ cơ bản (BFS/DFS)",
+  "description": "8 node, mọi cạnh cost = 1. Có 2 đường từ Hacker tới Server: đường ngắn và đường dài. DFS có thể tìm đường dài hơn BFS.",
+  "hacker_start": "PC1",
+  "goal_nodes": ["Server"],
+  "nodes": [
+    {
+      "id": "PC1",
+      "kind": "pc",
+      "position": [120, 350],
+      "security_level": 2,
+      "zone": "User Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": true,
+      "monitored": false,
+      "importance": 3,
+      "detection_risk": 0.1
+    },
+    {
+      "id": "PC2",
+      "kind": "pc",
+      "position": [120, 180],
+      "security_level": 2,
+      "zone": "User Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 2,
+      "detection_risk": 0.1
+    },
+    {
+      "id": "Switch1",
+      "kind": "switch",
+      "position": [310, 265],
+      "security_level": 4,
+      "zone": "User Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 5,
+      "detection_risk": 0.2
+    },
+    {
+      "id": "Router",
+      "kind": "router",
+      "position": [490, 180],
+      "security_level": 5,
+      "zone": "DMZ",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 6,
+      "detection_risk": 0.3
+    },
+    {
+      "id": "Switch2",
+      "kind": "switch",
+      "position": [490, 420],
+      "security_level": 4,
+      "zone": "DMZ",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": false,
+      "importance": 5,
+      "detection_risk": 0.2
+    },
+    {
+      "id": "Firewall",
+      "kind": "firewall",
+      "position": [670, 300],
+      "security_level": 9,
+      "zone": "Server Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": true,
+      "importance": 8,
+      "detection_risk": 0.5
+    },
+    {
+      "id": "IDS",
+      "kind": "ids",
+      "position": [670, 150],
+      "security_level": 7,
+      "zone": "DMZ",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": true,
+      "importance": 7,
+      "detection_risk": 0.8
+    },
+    {
+      "id": "Server",
+      "kind": "server",
+      "position": [850, 265],
+      "security_level": 10,
+      "zone": "Server Zone",
+      "blocked": false,
+      "visible": true,
+      "compromised": false,
+      "monitored": true,
+      "importance": 10,
+      "detection_risk": 1.0
+    }
+  ],
+  "edges": [
+    {"source": "PC1", "target": "Switch1", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "PC2", "target": "Switch1", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch1", "target": "Router", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch1", "target": "Switch2", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Router", "target": "IDS", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Router", "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch2", "target": "Firewall", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "IDS", "target": "Server", "base_cost": 1.0, "blocked": false, "bidirectional": true},
+    {"source": "Firewall", "target": "Server", "base_cost": 1.0, "blocked": false, "bidirectional": true}
+  ],
+  "metadata": {
+    "group": "uninformed",
+    "notes": "BFS tìm đường 4 bước (PC1→Switch1→Router→Firewall→Server). DFS có thể tìm PC1→Switch1→Switch2→Firewall→Server."
+  }
+}
