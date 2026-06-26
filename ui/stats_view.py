@@ -94,6 +94,14 @@ class StatsView:
                     ("backtracks", "Backtracks"),
                     ("temperature", "Temp"),
                     ("accepted_worse_moves", "Worse"),
+                    ("evaluation", "Eval"),
+                    ("expected_value", "Expected"),
+                    ("alpha", "Alpha"),
+                    ("beta", "Beta"),
+                    ("pruned_branches", "Pruned"),
+                    ("belief", "Belief"),
+                    ("plan", "Plan"),
+                    ("plan_lines", "Plan"),
                 ):
                     if key in step.data:
                         value = step.data[key]

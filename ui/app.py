@@ -121,8 +121,8 @@ class App:
             return
 
         group = self.state.selected_group_index
-        if group not in (0, 1, 2, 3):
-            self._show_toast("Compare is ready for groups 1-4")
+        if group not in (0, 1, 2, 3, 4, 5):
+            self._show_toast("Compare is ready for groups 1-6")
             return
 
         self._step_gen = None
@@ -191,6 +191,26 @@ class App:
             from algorithms.csp.min_conflicts import solve_steps
             return "Min-Conflicts", solve_steps
 
+        if group == 4:
+            if algo_idx == 0:
+                from algorithms.complex_environment.belief_unobservable import solve_steps
+                return "Belief Unobservable", solve_steps
+            if algo_idx == 1:
+                from algorithms.complex_environment.belief_partial_observable import solve_steps
+                return "Belief Partial", solve_steps
+            from algorithms.complex_environment.and_or_graph import solve_steps
+            return "AND-OR", solve_steps
+
+        if group == 5:
+            if algo_idx == 0:
+                from algorithms.adversarial.minimax import solve_steps
+                return "Minimax", solve_steps
+            if algo_idx == 1:
+                from algorithms.adversarial.alpha_beta import solve_steps
+                return "Alpha-Beta", solve_steps
+            from algorithms.adversarial.expectimax import solve_steps
+            return "Expectimax", solve_steps
+
         raise ValueError(f"Group {group + 1} is not implemented yet")
 
     def _algorithm_run_specs(self, group: int) -> list[tuple[str, Callable]]:
@@ -222,6 +242,24 @@ class App:
                 ("Forward Checking", forward_checking.run),
                 ("Min-Conflicts", min_conflicts.run),
             ]
+        if group == 4:
+            from algorithms.complex_environment import (
+                and_or_graph,
+                belief_partial_observable,
+                belief_unobservable,
+            )
+            return [
+                ("Belief Unobs.", belief_unobservable.run),
+                ("Belief Partial", belief_partial_observable.run),
+                ("AND-OR", and_or_graph.run),
+            ]
+        if group == 5:
+            from algorithms.adversarial import alpha_beta, expectimax, minimax
+            return [
+                ("Minimax", minimax.run),
+                ("Alpha-Beta", alpha_beta.run),
+                ("Expectimax", expectimax.run),
+            ]
         return []
 
     def _run_compare_algorithms(self, group: int) -> list[AlgorithmResult]:
@@ -245,6 +283,10 @@ class App:
                 )
             elif group == 3 and expected_name == "Min-Conflicts":
                 result = run_func(graph, start, goals, seed=seed, max_steps=300)
+            elif group == 4:
+                result = run_func(graph, start, goals, metadata=self._map_data.metadata)
+            elif group == 5:
+                result = run_func(graph, start, goals, depth=self.state.game_depth)
             else:
                 result = run_func(graph, start, goals)
             result.metrics.algorithm = expected_name
@@ -290,6 +332,20 @@ class App:
                 self._map_data.goal_nodes,
                 seed=seed,
                 max_steps=300,
+            )
+        elif group == 4:
+            self._step_gen = solve_steps(
+                self._map_data.graph,
+                self._map_data.hacker_start,
+                self._map_data.goal_nodes,
+                metadata=self._map_data.metadata,
+            )
+        elif group == 5:
+            self._step_gen = solve_steps(
+                self._map_data.graph,
+                self._map_data.hacker_start,
+                self._map_data.goal_nodes,
+                depth=self.state.game_depth,
             )
         else:
             self._step_gen = solve_steps(

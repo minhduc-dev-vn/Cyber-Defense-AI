@@ -73,6 +73,9 @@ class GraphRenderer:
         firewall_nodes = set(getattr(defense_config, "firewall_nodes", []))
         ids_nodes = set(getattr(defense_config, "ids_nodes", []))
         upgraded_nodes = set(getattr(defense_config, "upgraded_nodes", []))
+        virtual_blocked_nodes = set(step.data.get("blocked_nodes", [])) if step else set()
+        hidden_nodes = set(step.data.get("hidden_nodes", [])) if step else set()
+        teacher_view = bool(step.data.get("teacher_view", False)) if step else False
 
         # Tập edge thuộc final path
         if final_path:
@@ -118,7 +121,7 @@ class GraphRenderer:
             r = NODE_RADIUS
 
             # Xác định trạng thái của node
-            if node.blocked:
+            if node.blocked or node.id in virtual_blocked_nodes:
                 state = "blocked"
             elif node.id == current:
                 state = "current"
@@ -181,7 +184,7 @@ class GraphRenderer:
             self.surface.blit(label, (nx - lw // 2, ny + r + 3))
 
             # Node bị chặn: vẽ dấu X
-            if node.blocked:
+            if node.blocked or node.id in virtual_blocked_nodes:
                 pygame.draw.line(self.surface, (200, 50, 50), (nx - 10, ny - 10), (nx + 10, ny + 10), 2)
                 pygame.draw.line(self.surface, (200, 50, 50), (nx + 10, ny - 10), (nx - 10, ny + 10), 2)
 
@@ -191,6 +194,15 @@ class GraphRenderer:
                 zone_surf = zone_font.render(zone[:10], True, COLOR_TEXT_SECONDARY)
                 zw, _ = zone_surf.get_size()
                 self.surface.blit(zone_surf, (nx - zw // 2, ny + r + 16))
+
+            if node.id in hidden_nodes and not teacher_view:
+                fog = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
+                fog.fill((8, 10, 18, 185))
+                self.surface.blit(fog, (nx - r - 4, ny - r - 4))
+                q_font = get_font(18, bold=True)
+                q_surf = q_font.render("?", True, (230, 235, 250))
+                qw, qh = q_surf.get_size()
+                self.surface.blit(q_surf, (nx - qw // 2, ny - qh // 2))
 
     def _draw_node_icon(self, kind: str, cx: int, cy: int, r: int) -> None:
         """Vẽ icon nhỏ bên trong node theo loại."""
