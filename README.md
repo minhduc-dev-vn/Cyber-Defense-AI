@@ -1,151 +1,146 @@
 # Cyber Defense AI
 
-> **Tên đề tài:** Cyber Defense AI: Mô phỏng tìm kiếm, tối ưu, phân vùng mạng và đối kháng giữa Hacker với hệ thống phòng thủ  
-> **Loại sản phẩm:** Ứng dụng desktop trực quan bằng Python + Pygame  
-> **⚠️ Lưu ý an toàn:** Đây chỉ là mô phỏng game/đồ thị mạng phục vụ học thuật. Không triển khai hack thật, quét mạng, khai thác lỗ hổng, mã độc hoặc kết nối tới hệ thống bên ngoài.
+Cyber Defense AI là ứng dụng desktop bằng Python + Pygame để mô phỏng các thuật toán AI trong bối cảnh phòng thủ mạng. Dự án dùng đồ thị mạng nhỏ để minh họa tìm đường, tối ưu phòng thủ, phân vùng CSP, belief-state và trò chơi đối kháng Hacker/Defender.
 
----
+Đây là mô phỏng học thuật. Ứng dụng không quét mạng, không khai thác lỗ hổng, không tạo payload và không kết nối tới hệ thống bên ngoài.
 
-## Mô tả
+## Tính năng chính
 
-Ứng dụng mô phỏng mạng máy tính dưới dạng đồ thị trực quan:
+- Giao diện Pygame trực quan với bản đồ mạng, log thuật toán, bảng giám sát, kết quả và đường đi.
+- 6 nhóm thuật toán, tổng cộng 18 thuật toán.
+- Chạy tự động, tạm dừng, chạy từng bước, đặt lại và so sánh nhóm.
+- Animation frontier/explored/current/final path, zone coloring, fog of war, plan tree và pruning/chance data.
+- 7 map JSON mẫu cho từng nhóm thuật toán.
+- Unit test cho core graph, 18 thuật toán, UI wiring và Phase 8 stability.
 
-- **Hacker** tìm đường từ node xuất phát tới `Server` hoặc `Database`
-- **Defender** bảo vệ mạng bằng cách chặn node/cạnh, bố trí `Firewall`, `IDS`, tăng bảo mật và phân vùng security zone
-- Ứng dụng có **6 nhóm thuật toán AI**, tổng cộng **18 thuật toán**
+## Cài đặt
 
----
+Yêu cầu:
 
-## Yêu cầu hệ thống
+- Python 3.11 trở lên
+- Pygame 2.6 trở lên
 
-- Python 3.11 hoặc 3.12+
-- Pygame 2.6+
-
----
-
-## Cài đặt và Chạy
+Windows:
 
 ```bash
-# Windows
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python main.py
+```
 
-# macOS/Linux
+macOS/Linux:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
 
----
+## Chạy test
 
-## Chạy Tests
+Từ thư mục `Cyber-Defense-AI`:
 
 ```bash
-python -m pytest tests/ -v
-# hoặc từng file test
-python -m pytest tests/test_graph.py -v
+python -m pytest tests -q
 ```
 
----
+Kiểm tra riêng Phase 8:
 
-## Cấu trúc thư mục
-
-```
-cyber_defense_ai/
-│
-├── main.py               # Entry point
-├── requirements.txt
-├── README.md
-├── context.md            # Ngữ cảnh project cho AI tiếp tục
-│
-├── core/
-│   ├── models.py         # Dataclass: Node, Edge, GameState, StepEvent, ...
-│   ├── graph.py          # NetworkGraph class
-│   ├── state.py          # AlgorithmState, GameplayState
-│   ├── map_loader.py     # Đọc JSON map
-│   ├── metrics.py        # AlgorithmMetrics, thống kê
-│   ├── event_log.py      # EventLog - ghi log từng bước
-│   ├── constants.py      # Hằng số: chi phí, màu sắc
-│   └── utils.py          # Hàm tiện ích
-│
-├── algorithms/
-│   ├── uninformed/       # BFS, DFS, UCS
-│   ├── informed/         # GSA, A*, IDA*
-│   ├── local_search/     # Simple HC, Steepest HC, SA
-│   ├── complex_environment/ # Belief state, AND-OR
-│   ├── csp/              # Backtracking, Forward Checking, Min-Conflicts
-│   └── adversarial/      # Minimax, Alpha-Beta, Expectimax
-│
-├── ui/
-│   ├── app.py            # Pygame app chính
-│   ├── layout.py         # Bố cục vùng
-│   ├── renderer.py       # Vẽ đồ thị
-│   ├── controls.py       # Các nút điều khiển
-│   ├── panels.py         # Panel bên trái
-│   ├── graph_view.py     # Vùng hiển thị bản đồ
-│   ├── log_view.py       # Vùng log
-│   ├── stats_view.py     # Vùng thống kê
-│   └── theme.py          # Màu sắc, font
-│
-├── maps/                 # 7 file JSON map mẫu
-│
-└── tests/                # Unit tests
+```bash
+python -m pytest tests/test_phase8_polish.py -q
 ```
 
----
+## Tạo screenshot demo
 
-## 18 Thuật toán
+```bash
+python tools/render_demo_assets.py
+```
 
-| # | Nhóm | Thuật toán | Bài toán |
-|---|------|-----------|---------|
-| 1 | Tìm kiếm mù | BFS | Hacker tìm đường tới Server |
-| 2 | Tìm kiếm mù | DFS | Hacker tìm đường tới Server |
-| 3 | Tìm kiếm mù | UCS | Hacker tìm đường chi phí thấp nhất |
-| 4 | Heuristic | Greedy Search | Hacker tìm đường nhanh nhất theo ước lượng |
-| 5 | Heuristic | A* | Hacker tìm đường tối ưu g+h |
-| 6 | Heuristic | IDA* | Hacker tìm đường tối ưu, tiết kiệm bộ nhớ |
-| 7 | Tìm kiếm cục bộ | Simple Hill Climbing | Defender tối ưu phòng thủ |
-| 8 | Tìm kiếm cục bộ | Steepest Ascent HC | Defender tối ưu phòng thủ |
-| 9 | Tìm kiếm cục bộ | Simulated Annealing | Defender tối ưu tránh local optimum |
-| 10 | Môi trường phức tạp | Belief Unobservable | Defender chặn Hacker vô hình |
-| 11 | Môi trường phức tạp | Belief Partial | Defender chặn Hacker qua IDS |
-| 12 | Môi trường phức tạp | AND-OR Graph | Defender lập kế hoạch điều kiện |
-| 13 | CSP | Backtracking | Phân vùng Security Zone |
-| 14 | CSP | Forward Checking | Phân vùng Security Zone |
-| 15 | CSP | Min-Conflicts | Phân vùng Security Zone |
-| 16 | Đối kháng | Minimax | Hacker vs Defender game tree |
-| 17 | Đối kháng | Alpha-Beta | Minimax tối ưu với pruning |
-| 18 | Đối kháng | Expectimax | Game tree với chance nodes |
+Script sẽ tạo:
 
----
+- `screenshots/demo_1366x768.png`
+- `screenshots/demo_1920x1080.png`
 
-## Điều khiển UI
+## Điều khiển giao diện
 
-- **Tab nhóm**: Chọn 1 trong 6 nhóm thuật toán
-- **Dropdown thuật toán**: Chọn thuật toán trong nhóm
-- **Dropdown map**: Chọn bản đồ phù hợp
-- **Start / Pause / Step / Reset**: Điều khiển animation
-- **Tốc độ**: 0.5x, 1x, 2x, 4x
-- **Random Seed**: Đảm bảo kết quả tái lập
-- **Compare**: So sánh các thuật toán cùng nhóm
-- **Show/Hide Details**: Bật tắt bảng frontier/domain/alpha-beta
+- Tab trên cùng: chọn 1 trong 6 nhóm thuật toán.
+- Dropdown thuật toán: chọn thuật toán trong nhóm hiện tại.
+- Dropdown bản đồ: chọn map phù hợp với nhóm.
+- `Chạy`: bắt đầu animation.
+- `Dừng`: tạm dừng animation.
+- `Bước`: chạy từng bước khi đang sẵn sàng hoặc tạm dừng.
+- `Đặt lại`: đưa lượt chạy hiện tại về trạng thái ban đầu.
+- Tốc độ mô phỏng: `0.5x`, `1x`, `2x`, `4x`.
+- `So sánh nhóm`: chạy các thuật toán cùng nhóm và hiển thị bảng so sánh.
 
----
+Chi tiết nội bộ như frontier, explored, current, domain, belief, alpha/beta hoặc plan được hiển thị trong panel giám sát/log khi thuật toán cung cấp dữ liệu.
 
-## Quy ước màu sắc
+## Danh sách thuật toán
 
-| Đối tượng | Màu |
-|-----------|-----|
-| Hacker | Đỏ |
-| Server/Database | Tím |
-| Firewall | Cam đậm (viền dày) |
-| IDS | Vàng (viền vàng) |
-| Frontier | Cam |
-| Explored | Xám |
-| Current node | Vàng sáng |
-| Final path | Đỏ/cam đậm |
-| Blocked | Xám đậm |
-| CSP zone | Màu riêng theo zone |
+| Nhóm | Thuật toán | Vai trò mô phỏng |
+|---|---|---|
+| Tìm kiếm mù | BFS | Tìm đường theo chiều rộng |
+| Tìm kiếm mù | DFS | Tìm đường theo chiều sâu |
+| Tìm kiếm mù | UCS | Tìm đường chi phí thấp nhất |
+| Tìm kiếm có phí | Greedy Best-First Search | Chọn node theo heuristic `h` |
+| Tìm kiếm có phí | A* | Chọn node theo `f = g + h` |
+| Tìm kiếm có phí | IDA* | A* theo ngưỡng lặp, tiết kiệm bộ nhớ |
+| Tìm kiếm cục bộ | Simple Hill Climbing | Tối ưu cấu hình phòng thủ |
+| Tìm kiếm cục bộ | Steepest Ascent Hill Climbing | Chọn neighbor tốt nhất |
+| Tìm kiếm cục bộ | Simulated Annealing | Chấp nhận bước xấu theo xác suất để thoát local optimum |
+| Môi trường phức tạp | Belief Unobservable | Defender lập kế hoạch khi không thấy hacker |
+| Môi trường phức tạp | Belief Partial Observable | Cập nhật belief từ quan sát IDS |
+| Môi trường phức tạp | AND-OR Graph Search | Tạo conditional plan cho action không chắc chắn |
+| CSP | Backtracking | Phân vùng security zone |
+| CSP | Forward Checking | Phân vùng zone với lọc domain sớm |
+| CSP | Min-Conflicts | Sửa assignment đang conflict |
+| Môi trường đối kháng | Minimax | Hacker/Defender tối ưu đối kháng |
+| Môi trường đối kháng | Alpha-Beta Pruning | Minimax có cắt nhánh |
+| Môi trường đối kháng | Expectimax | Game tree có chance node |
+
+## Map mẫu
+
+- `pathfinding_basic.json`: BFS/DFS/UCS cơ bản.
+- `weighted_network.json`: Greedy/A*/IDA* và chi phí có trọng số.
+- `defense_optimization.json`: local search tối ưu phòng thủ.
+- `belief_hidden.json`: belief-state không quan sát.
+- `belief_partial.json`: belief-state quan sát một phần.
+- `csp_segmentation.json`: phân vùng security zone.
+- `adversarial_game.json`: Minimax/Alpha-Beta/Expectimax.
+
+## Cấu trúc dự án
+
+```text
+Cyber-Defense-AI/
+  main.py
+  requirements.txt
+  README.md
+  DEMO_SCRIPT.md
+  tools/
+    render_demo_assets.py
+  algorithms/
+    uninformed/
+    informed/
+    local_search/
+    complex_environment/
+    csp/
+    adversarial/
+  core/
+    graph.py
+    map_loader.py
+    models.py
+    state.py
+    metrics.py
+    event_log.py
+    constants.py
+    utils.py
+  maps/
+  tests/
+  ui/
+```
+
+## Demo
+
+Kịch bản thuyết trình nằm ở `DEMO_SCRIPT.md`. Nên demo theo thứ tự: tìm kiếm mù, heuristic, local search, CSP, môi trường phức tạp, đối kháng, sau đó dùng `So sánh nhóm` và `Đặt lại` để kết thúc.

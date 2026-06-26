@@ -84,7 +84,7 @@ class AppState:
     # Điều khiển
     speed_key: str = "1x"
     random_seed: int = 42
-    show_details: bool = False
+    show_details: bool = True
 
     # Simulated Annealing params
     sa_t0: float = 100.0

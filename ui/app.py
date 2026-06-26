@@ -14,21 +14,54 @@ import pygame
 
 from core.constants import FPS, SPEED_OPTIONS, WINDOW_HEIGHT, WINDOW_WIDTH
 from core.map_loader import MapData, MapLoadError, load_map
-from core.metrics import format_compare_table
 from core.models import AlgorithmMetrics, AlgorithmResult, StepEvent
 from core.state import AlgorithmRunState, AppState
 from ui.graph_view import GraphView
 from ui.layout import Layout
 from ui.log_view import LogView
-from ui.panels import ControlPanel
+from ui.node_art import draw_network_node
+from ui.panels import ControlPanel, GROUPS, GROUP_MAPS, algo_label, map_label
 from ui.stats_view import StatsView
-from ui.theme import COLOR_BG, get_font
+from ui.theme import (
+    COLOR_BG,
+    COLOR_BLOCKED,
+    COLOR_CURRENT,
+    COLOR_EDGE_DEFAULT,
+    COLOR_FRONTIER,
+    COLOR_NODE_FIREWALL,
+    COLOR_NODE_HACKER,
+    COLOR_NODE_IDS,
+    COLOR_NODE_SERVER,
+    COLOR_PANEL_BORDER,
+    COLOR_TEXT_ERROR,
+    COLOR_TEXT_PRIMARY,
+    COLOR_TEXT_SECONDARY,
+    COLOR_TEXT_SUCCESS,
+    COLOR_ACCENT,
+    COLOR_ACCENT_SOFT,
+    COLOR_PANEL_HIGHLIGHT,
+    draw_panel,
+    draw_text_fit,
+    get_font,
+    get_node_color,
+)
+
+
+NODE_KIND_LABELS = {
+    "pc": "Máy trạm",
+    "router": "Bộ định tuyến",
+    "switch": "Bộ chuyển mạch",
+    "firewall": "Tường lửa",
+    "ids": "IDS",
+    "server": "Máy chủ",
+    "database": "Cơ sở dữ liệu",
+}
 
 
 class App:
     """Pygame application shell for the Cyber Defense AI simulator."""
 
-    TITLE = "Cyber Defense AI - AI network defense simulator"
+    TITLE = "Cyber Defense AI - Trình mô phỏng phòng thủ mạng AI"
 
     def __init__(self) -> None:
         pygame.init()
@@ -77,10 +110,10 @@ class App:
             self._map_data = load_map(path)
             self.state.map_data = self._map_data
             self.state.selected_map_name = map_name
-            self._show_toast(f"Loaded map: {self._map_data.name}")
+            self._show_toast(f"Đã tải bản đồ: {map_label(map_name)}")
             return True
         except MapLoadError as exc:
-            self._show_toast(f"Map load failed: {exc}", duration=4.0)
+            self._show_toast(f"Tải bản đồ thất bại: {exc}", duration=4.0)
             return False
 
     def _show_toast(self, msg: str, duration: float = 2.5) -> None:
@@ -117,12 +150,12 @@ class App:
 
     def _on_compare(self) -> None:
         if not self._map_data:
-            self._show_toast("No map loaded")
+            self._show_toast("Chưa tải bản đồ")
             return
 
         group = self.state.selected_group_index
         if group not in (0, 1, 2, 3, 4, 5):
-            self._show_toast("Compare is ready for groups 1-6")
+            self._show_toast("So sánh đã sẵn sàng cho nhóm 1-6")
             return
 
         self._step_gen = None
@@ -132,15 +165,15 @@ class App:
         results = self._run_compare_algorithms(group)
         self.state.compare_results = results
         self.state.compare_mode = True
-        run.algorithm_name = "Compare"
+        run.algorithm_name = "So sánh"
         run.status = "success" if results and all(r.success for r in results) else "failure"
         run.metrics = results[0].metrics if results else None
 
-        table = format_compare_table([result.metrics for result in results])
+        table = self._format_compare_log(results)
         for line in table.splitlines():
             run.log.log(line, "info")
         self.log_view.update(run.log)
-        self._show_toast("Compare completed")
+        self._show_toast("Đã hoàn tất so sánh")
 
     def _on_algo_change(self, idx: int, name: str) -> None:
         self._on_reset()
@@ -293,6 +326,27 @@ class App:
             results.append(result)
         return results
 
+    def _format_compare_log(self, results: list[AlgorithmResult]) -> str:
+        """Format compare rows for the Vietnamese UI log."""
+        header = (
+            f"{'Thuật toán':<28} | {'Đạt':>5} | {'Đường':>6} | {'Chi phí':>10} | "
+            f"{'Mở rộng':>9} | {'Biên max':>9} | {'Thời gian':>10}"
+        )
+        rows = [header, "-" * len(header)]
+        for result in results:
+            metrics = result.metrics
+            path_len = max(0, len(metrics.path) - 1)
+            rows.append(
+                f"{algo_label(metrics.algorithm):<28} | "
+                f"{'Có' if metrics.success else 'Không':>5} | "
+                f"{path_len:>6} | "
+                f"{metrics.total_cost:>10.2f} | "
+                f"{metrics.nodes_expanded:>9} | "
+                f"{metrics.max_frontier_size:>9} | "
+                f"{metrics.time_ms:>8.2f}ms"
+            )
+        return "\n".join(rows)
+
     def _build_step_gen(self) -> None:
         run = self.state.run_state
         run.reset()
@@ -300,7 +354,7 @@ class App:
         self.state.compare_results.clear()
 
         if not self._map_data:
-            self._show_toast("No map loaded")
+            self._show_toast("Chưa tải bản đồ")
             return
 
         group = self.state.selected_group_index
@@ -308,7 +362,7 @@ class App:
         try:
             name, solve_steps = self._algorithm_step_runner(group, algo_idx)
         except ValueError:
-            self._show_toast(f"Group {group + 1} will be implemented later")
+            self._show_toast(f"Nhóm {group + 1} sẽ được bổ sung sau")
             run.status = "ready"
             return
 
@@ -357,10 +411,7 @@ class App:
         run.status = "ready"
 
     def _current_seed(self) -> int:
-        try:
-            value = int(self.control_panel.seed_input.value)
-        except (AttributeError, TypeError, ValueError):
-            value = self.state.random_seed
+        value = self.state.random_seed
         self.state.random_seed = value
         return value
 
@@ -388,14 +439,14 @@ class App:
         if step.event_type == "found":
             run.status = "success"
             self._step_gen = None
-            self._show_toast(f"{step.algorithm} completed")
+            self._show_toast(f"{algo_label(step.algorithm)} đã hoàn tất")
             return False
 
         if self._is_failure_step(step):
             run.status = "failure"
             run.metrics = self._metrics_from_step(step, success=False)
             self._step_gen = None
-            self._show_toast(f"{step.algorithm} failed")
+            self._show_toast(f"{algo_label(step.algorithm)} thất bại")
             return False
 
         return True
@@ -450,6 +501,7 @@ class App:
                         self._on_reset()
 
                 self.control_panel.handle_event(event)
+                self._handle_top_nav_event(event)
                 self.graph_view.handle_event(event)
                 self.log_view.handle_event(event)
 
@@ -462,37 +514,44 @@ class App:
                     if not self._do_one_step() and run.status == "running":
                         run.status = "failure"
 
-            self.screen.fill(COLOR_BG)
-
-            current_step = run.current_step
-            hacker_pos = self._map_data.hacker_start if self._map_data else ""
-            goals = self._map_data.goal_nodes if self._map_data else []
-            self.graph_view.draw(
-                self.screen,
-                current_step,
-                hacker_pos,
-                goals,
-                graph=self._map_data.graph if self._map_data else None,
-            )
-
-            self.stats_view.draw(
-                self.screen,
-                step=current_step,
-                metrics=run.metrics,
-                status=run.status,
-                show_details=self.state.show_details,
-                compare_results=self.state.compare_results if self.state.compare_mode else None,
-            )
-
-            self.control_panel.draw(self.screen)
-            self.log_view.draw(self.screen)
-            self._draw_toast()
-            if self._map_data:
-                self._draw_map_title()
-
+            self.render_frame()
             pygame.display.flip()
 
         pygame.quit()
+
+    def render_frame(self) -> None:
+        """Render one complete UI frame onto the current screen surface."""
+        run = self.state.run_state
+        self.screen.fill(COLOR_BG)
+        self._draw_header()
+        self._draw_top_nav()
+
+        current_step = run.current_step
+        hacker_pos = self._map_data.hacker_start if self._map_data else ""
+        goals = self._map_data.goal_nodes if self._map_data else []
+        self.graph_view.draw(
+            self.screen,
+            current_step,
+            hacker_pos,
+            goals,
+            graph=self._map_data.graph if self._map_data else None,
+        )
+
+        self.stats_view.draw(
+            self.screen,
+            step=current_step,
+            metrics=run.metrics,
+            status=run.status,
+            show_details=self.state.show_details,
+            compare_results=self.state.compare_results if self.state.compare_mode else None,
+        )
+
+        self.control_panel.draw(self.screen)
+        self.log_view.draw(self.screen)
+        self._draw_right_panel()
+        self._draw_toast()
+        if self._map_data:
+            self._draw_map_title()
 
     def _rebuild_views(self) -> None:
         self.graph_view.rect = self.layout.graph_area
@@ -500,6 +559,201 @@ class App:
         self.stats_view.rect = self.layout.stats_overlay
         self.control_panel.rect = self.layout.control_panel
         self.control_panel._build_widgets()
+
+    def _handle_top_nav_event(self, event: pygame.event.Event) -> bool:
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return False
+        for idx, rect in enumerate(self._top_nav_rects()):
+            if rect.collidepoint(event.pos):
+                if idx == self.state.selected_group_index:
+                    return True
+                self.state.selected_group_index = idx
+                self.state.selected_algo_index = 0
+                map_name = GROUP_MAPS[idx][0]
+                if self._load_map(map_name) and self._map_data:
+                    self.graph_view.set_graph(self._map_data.graph)
+                self._on_reset()
+                self.control_panel._build_widgets()
+                return True
+        return False
+
+    def _top_nav_rects(self) -> list[pygame.Rect]:
+        rect = self.layout.top_tabs
+        gap = 10
+        tab_w = (rect.width - gap * (len(GROUPS) - 1)) // len(GROUPS)
+        return [
+            pygame.Rect(rect.x + i * (tab_w + gap), rect.y + 5, tab_w, rect.height - 10)
+            for i in range(len(GROUPS))
+        ]
+
+    def _draw_header(self) -> None:
+        rect = self.layout.title_bar
+        pygame.draw.rect(self.screen, (2, 7, 14), rect)
+        pygame.draw.line(self.screen, (25, 45, 65), (0, rect.bottom - 1), (rect.right, rect.bottom - 1), 1)
+        shield = pygame.Rect(18, 10, 22, 22)
+        pygame.draw.polygon(
+            self.screen,
+            (21, 66, 117),
+            [(shield.centerx, shield.y), (shield.right, shield.y + 6), (shield.right - 3, shield.bottom - 4), (shield.centerx, shield.bottom), (shield.x + 3, shield.bottom - 4), (shield.x, shield.y + 6)],
+        )
+        pygame.draw.polygon(
+            self.screen,
+            (220, 238, 255),
+            [(shield.centerx, shield.y + 5), (shield.centerx + 5, shield.y + 10), (shield.centerx + 2, shield.y + 10), (shield.centerx + 2, shield.y + 17), (shield.centerx - 2, shield.y + 17), (shield.centerx - 2, shield.y + 10), (shield.centerx - 5, shield.y + 10)],
+        )
+        title_font = get_font(16, bold=True)
+        sub_font = get_font(15)
+        title = title_font.render("Cyber Defense AI", True, COLOR_TEXT_PRIMARY)
+        self.screen.blit(title, (52, 12))
+        subtitle = sub_font.render("- Mô phỏng thuật toán AI", True, COLOR_TEXT_SECONDARY)
+        self.screen.blit(subtitle, (52 + title.get_width() + 8, 13))
+
+    def _draw_top_nav(self) -> None:
+        rect = self.layout.top_tabs
+        draw_panel(self.screen, rect)
+        for idx, tab_rect in enumerate(self._top_nav_rects()):
+            active = idx == self.state.selected_group_index
+            bg = (13, 73, 155) if active else (4, 13, 24)
+            border = (59, 138, 246) if active else (31, 53, 76)
+            if active:
+                for spread, alpha in ((8, 42), (4, 58)):
+                    glow_rect = tab_rect.inflate(spread, spread)
+                    glow = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+                    pygame.draw.rect(glow, (55, 142, 255, alpha), glow.get_rect(), border_radius=8)
+                    self.screen.blit(glow, glow_rect.topleft)
+            pygame.draw.rect(self.screen, bg, tab_rect, border_radius=6)
+            top = pygame.Surface((tab_rect.width, max(2, tab_rect.height // 2)), pygame.SRCALPHA)
+            top.fill((110, 184, 255, 64 if active else 22))
+            self.screen.blit(top, tab_rect.topleft)
+            pygame.draw.rect(self.screen, border, tab_rect, 1, border_radius=6)
+            pygame.draw.line(self.screen, COLOR_PANEL_HIGHLIGHT if not active else (168, 216, 255), (tab_rect.x + 6, tab_rect.y + 1), (tab_rect.right - 7, tab_rect.y + 1), 1)
+            icon_rect = pygame.Rect(tab_rect.x + 22, tab_rect.centery - 12, 24, 24)
+            pygame.draw.circle(self.screen, (13, 39, 68) if active else (8, 24, 42), icon_rect.center, 12)
+            pygame.draw.circle(self.screen, (192, 222, 255) if active else (135, 155, 176), icon_rect.center, 11, 1)
+            self._draw_nav_icon(idx, icon_rect, COLOR_TEXT_PRIMARY if active else COLOR_TEXT_SECONDARY)
+            draw_text_fit(
+                self.screen,
+                GROUPS[idx],
+                pygame.Rect(tab_rect.x + 54, tab_rect.y, tab_rect.width - 62, tab_rect.height),
+                COLOR_TEXT_PRIMARY if active else COLOR_TEXT_SECONDARY,
+                size=13,
+                bold=True,
+            )
+
+    def _draw_nav_icon(self, idx: int, rect: pygame.Rect, color: tuple[int, int, int]) -> None:
+        cx, cy = rect.center
+        if idx == 0:
+            pygame.draw.circle(self.screen, color, (cx, cy), 6, 1)
+            pygame.draw.line(self.screen, color, (cx, cy - 9), (cx, cy - 4), 1)
+            pygame.draw.line(self.screen, color, (cx, cy + 4), (cx, cy + 9), 1)
+            pygame.draw.line(self.screen, color, (cx - 9, cy), (cx - 4, cy), 1)
+            pygame.draw.line(self.screen, color, (cx + 4, cy), (cx + 9, cy), 1)
+        elif idx == 1:
+            for px, py in ((-5, -4), (4, -6), (5, 5)):
+                pygame.draw.circle(self.screen, color, (cx + px, cy + py), 2, 1)
+            pygame.draw.line(self.screen, color, (cx - 3, cy - 4), (cx + 2, cy - 6), 1)
+            pygame.draw.line(self.screen, color, (cx + 4, cy - 4), (cx + 5, cy + 3), 1)
+        elif idx == 2:
+            pygame.draw.circle(self.screen, color, (cx - 2, cy - 2), 6, 1)
+            pygame.draw.line(self.screen, color, (cx + 3, cy + 3), (cx + 8, cy + 8), 2)
+            pygame.draw.line(self.screen, color, (cx - 2, cy - 8), (cx - 2, cy + 4), 1)
+            pygame.draw.line(self.screen, color, (cx - 8, cy - 2), (cx + 4, cy - 2), 1)
+        elif idx == 3:
+            for ox, oy in ((-5, -5), (5, -5), (-5, 5), (5, 5)):
+                pygame.draw.rect(self.screen, color, pygame.Rect(cx + ox - 3, cy + oy - 3, 6, 6), 1, border_radius=1)
+            pygame.draw.line(self.screen, color, (cx - 2, cy), (cx + 2, cy), 1)
+            pygame.draw.line(self.screen, color, (cx, cy - 2), (cx, cy + 2), 1)
+        elif idx == 4:
+            pygame.draw.circle(self.screen, color, (cx, cy), 7, 1)
+            pygame.draw.line(self.screen, color, (cx, cy - 9), (cx, cy + 9), 1)
+            pygame.draw.line(self.screen, color, (cx - 9, cy), (cx + 9, cy), 1)
+            pygame.draw.rect(self.screen, color, pygame.Rect(cx - 3, cy - 3, 6, 6), 1)
+        else:
+            pygame.draw.arc(self.screen, color, pygame.Rect(cx - 8, cy - 8, 16, 16), 0.2, 4.6, 1)
+            pygame.draw.polygon(self.screen, color, [(cx + 8, cy - 1), (cx + 4, cy - 4), (cx + 5, cy + 1)])
+            pygame.draw.circle(self.screen, color, (cx, cy), 3, 1)
+
+    def _draw_right_panel(self) -> None:
+        rect = self.layout.right_panel
+        draw_panel(self.screen, rect, "Thông tin node")
+        if not self._map_data:
+            return
+        graph = self._map_data.graph
+        node_id = self.state.selected_node or self.state.hovered_node or self._map_data.hacker_start
+        node = graph.get_node(node_id)
+        if not node:
+            return
+        x = rect.x + 18
+        y = rect.y + 58
+        legend_h = max(214, min(268, int(rect.height * 0.42)))
+        legend_top = rect.bottom - legend_h
+        info_bottom = legend_top - 10
+        node_color = COLOR_NODE_HACKER if node.id == self._map_data.hacker_start else get_node_color(node.kind)
+        if node.id in self._map_data.goal_nodes:
+            node_color = COLOR_NODE_SERVER
+        draw_network_node(
+            self.screen,
+            node.kind,
+            (x + 28, y + 28),
+            22,
+            node_color,
+            hacker=node.id == self._map_data.hacker_start,
+            selected=True,
+        )
+        name = get_font(18, bold=True).render(node.id, True, COLOR_TEXT_PRIMARY)
+        self.screen.blit(name, (x + 72, y + 18))
+        y += 66
+        rows = [
+            ("Loại", NODE_KIND_LABELS.get(node.kind, node.kind)),
+            ("Mức bảo mật", f"{node.security_level} / 10"),
+            ("Trạng thái", "Bị hacker kiểm soát" if node.compromised else "An toàn"),
+            ("Thuộc Zone", node.zone or "Không có"),
+            ("IDS giám sát", "Có" if node.monitored else "Không"),
+        ]
+        for label, value in rows:
+            color = COLOR_TEXT_ERROR if label == "Trạng thái" and node.compromised else COLOR_TEXT_PRIMARY
+            if y + 20 > info_bottom:
+                break
+            draw_text_fit(self.screen, label + ":", pygame.Rect(x, y, 112, 20), COLOR_TEXT_SECONDARY, size=12)
+            draw_text_fit(self.screen, value, pygame.Rect(x + 118, y, rect.width - 146, 20), color, size=12)
+            y += 23
+
+        if y + 40 <= info_bottom:
+            conn_title = get_font(12, bold=True).render("Kết nối:", True, COLOR_TEXT_SECONDARY)
+            self.screen.blit(conn_title, (x, y))
+            y += 22
+            max_conn = max(0, (info_bottom - y) // 18)
+            for neighbor, cost, _ in graph.neighbors_with_cost(node.id, ignore_blocked=False)[:max_conn]:
+                text = f"- {neighbor} (chi phí: {cost:.0f})"
+                draw_text_fit(self.screen, text, pygame.Rect(x + 10, y, rect.width - 44, 18), (228, 242, 255), size=11)
+                y += 18
+
+        pygame.draw.line(self.screen, COLOR_PANEL_BORDER, (rect.x, legend_top), (rect.right, legend_top), 1)
+        self._draw_legend(rect, legend_top + 14)
+
+    def _draw_legend(self, rect: pygame.Rect, y: int) -> None:
+        title = get_font(13, bold=True).render("CHÚ THÍCH", True, (116, 195, 255))
+        self.screen.blit(title, (rect.x + 18, y))
+        items = [
+            (COLOR_NODE_HACKER, "Điểm xâm nhập / bắt đầu"),
+            ((80, 216, 106), "Nút an toàn"),
+            (COLOR_NODE_FIREWALL, "Tường lửa"),
+            (COLOR_NODE_IDS, "IDS"),
+            (COLOR_NODE_SERVER, "Máy chủ / CSDL"),
+            (COLOR_CURRENT, "Đang xét"),
+            (COLOR_FRONTIER, "Trong biên"),
+            (COLOR_BLOCKED, "Đã duyệt / bị khóa"),
+            (COLOR_EDGE_DEFAULT, "Kết nối"),
+        ]
+        y += 30
+        available_h = rect.bottom - y - 10
+        step = max(16, min(24, available_h // max(1, len(items))))
+        for color, label in items:
+            mark = pygame.Rect(rect.x + 20, y + 2, 14, 14)
+            pygame.draw.rect(self.screen, color, mark, border_radius=4)
+            pygame.draw.rect(self.screen, (220, 235, 255), mark, 1, border_radius=4)
+            draw_text_fit(self.screen, label, pygame.Rect(rect.x + 44, y, rect.width - 60, step), COLOR_TEXT_SECONDARY, size=12)
+            y += step
 
     def _draw_toast(self) -> None:
         if not self._toast or time.time() > self._toast_until:
@@ -511,12 +765,13 @@ class App:
         box_x = center_x - width // 2 - 12
         box_y = self.screen.get_height() - 50
         bg = pygame.Surface((width + 24, height + 12), pygame.SRCALPHA)
-        bg.fill((30, 40, 70, 220))
+        bg.fill((8, 24, 44, 232))
         self.screen.blit(bg, (box_x, box_y))
+        pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, pygame.Rect(box_x, box_y, width + 24, height + 12), 1, border_radius=7)
         self.screen.blit(surf, (box_x + 12, box_y + 6))
 
     def _draw_map_title(self) -> None:
         assert self._map_data is not None
         font = get_font(11)
-        surf = font.render(self._map_data.name, True, (100, 130, 180))
-        self.screen.blit(surf, (self.layout.graph_area.x + 8, self.layout.graph_area.y + 6))
+        surf = font.render(map_label(self.state.selected_map_name), True, COLOR_TEXT_SECONDARY)
+        self.screen.blit(surf, (self.layout.graph_area.x + 142, self.layout.graph_area.y + 14))
