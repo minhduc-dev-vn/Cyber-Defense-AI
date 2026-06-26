@@ -60,21 +60,16 @@ class StatsView:
     def _draw_details_table(self, surface: pygame.Surface, rect: pygame.Rect, step: Optional[StepEvent], show_details: bool) -> None:
         title = get_font(13, bold=True).render("GIÁM SÁT", True, (116, 195, 255))
         surface.blit(title, (rect.x + 12, rect.y + 12))
-        rows = [
-            ("Biên", ", ".join(step.frontier[:6]) if step else "-"),
-            ("Đã duyệt", ", ".join(step.explored[-8:]) if step else "-"),
-            ("Đang xét", step.current_node if step and step.current_node else "-"),
-        ]
-        if show_details and step and step.data:
-            for key in ("g", "h", "f", "threshold", "evaluation", "expected_value", "defense_value", "risk_cost", "blocked_paths", "open_paths", "belief", "plan"):
-                if key in step.data:
-                    value = step.data[key]
-                    rows.append((key, str(len(value)) if isinstance(value, list) else str(value)))
+        rows = self._monitor_rows(step, show_details)
 
         y = rect.y + 34
-        visible_rows = rows[:4]
+        visible_rows = rows[:5] if step and step.algorithm == "IDA*" else rows[:4]
         row_gap = 4
-        row_h = max(28, min(44, (rect.height - 52 - row_gap * max(0, len(visible_rows) - 1)) // max(1, len(visible_rows))))
+        min_row_h = 20 if len(visible_rows) > 4 else 28
+        row_h = max(
+            min_row_h,
+            min(44, (rect.height - 52 - row_gap * max(0, len(visible_rows) - 1)) // max(1, len(visible_rows))),
+        )
         for label, value in visible_rows:
             row_rect = pygame.Rect(rect.x + 12, y, rect.width - 24, row_h)
             pygame.draw.rect(surface, (7, 17, 31), row_rect, border_radius=5)
@@ -88,6 +83,41 @@ class StatsView:
                 size=10,
             )
             y += row_h + row_gap
+
+    def _monitor_rows(self, step: Optional[StepEvent], show_details: bool) -> list[tuple[str, str]]:
+        if not step:
+            return [
+                ("Biên", "-"),
+                ("Đã duyệt", "-"),
+                ("Đang xét", "-"),
+            ]
+
+        data = step.data or {}
+        if any(key in data for key in ("g", "h", "f", "threshold")):
+            rows = [("Đang xét", step.current_node or "-")]
+            if "g" in data:
+                rows.append(("g(n)", format_cost(float(data["g"]))))
+            if "h" in data:
+                rows.append(("h(n)", format_cost(float(data["h"]))))
+            if "f" in data:
+                rows.append(("f(n)=g+h", format_cost(float(data["f"]))))
+            if "threshold" in data:
+                rows.append(("Ngưỡng f", format_cost(float(data["threshold"]))))
+            if len(rows) < 4:
+                rows.append(("Biên", ", ".join(step.frontier[:6]) if step.frontier else "-"))
+            return rows
+
+        rows = [
+            ("Biên", ", ".join(step.frontier[:6]) if step.frontier else "-"),
+            ("Đã duyệt", ", ".join(step.explored[-8:]) if step.explored else "-"),
+            ("Đang xét", step.current_node if step.current_node else "-"),
+        ]
+        if show_details and data:
+            for key in ("evaluation", "expected_value", "defense_value", "risk_cost", "blocked_paths", "open_paths", "belief", "plan"):
+                if key in data:
+                    value = data[key]
+                    rows.append((key, str(len(value)) if isinstance(value, list) else str(value)))
+        return rows
 
     def _draw_result(
         self,

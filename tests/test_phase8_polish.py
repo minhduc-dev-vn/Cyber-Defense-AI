@@ -12,9 +12,13 @@ import pygame
 import pytest
 
 from algorithms.local_search import simulated_annealing
+from core.event_log import EventLog
 from core.map_loader import load_map
+from core.models import StepEvent
 from ui import theme
 from ui.app import App
+from ui.log_view import LogView
+from ui.stats_view import StatsView
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +102,80 @@ def test_custom_start_and_goal_nodes_drive_algorithm_input(app: App) -> None:
     assert run.metrics is not None
     assert run.metrics.path[0] == "PC2"
     assert run.metrics.path[-1] == "Firewall"
+
+
+def test_algorithm_log_is_group_specific(app: App) -> None:
+    from ui.panels import GROUP_MAPS
+
+    expected_terms = {
+        0: "queue FIFO",
+        1: "heuristic",
+        2: "DefenseValue",
+        3: "CSP phân vùng mạng",
+        4: "trạng thái niềm tin",
+        5: "Hacker(MAX) - Defender(MIN)",
+    }
+
+    for group, term in expected_terms.items():
+        app.state.selected_group_index = group
+        app.state.selected_algo_index = 0
+        assert app._load_map(GROUP_MAPS[group][0])
+        app._on_reset()
+        app._on_step()
+
+        entries = app.state.run_state.log.get_all()
+        assert entries
+        assert term in entries[-1].message
+
+
+def test_monitoring_prioritizes_idastar_heuristic_values() -> None:
+    view = StatsView(pygame.Rect(0, 0, 420, 160))
+    step = StepEvent(
+        step_index=3,
+        algorithm="IDA*",
+        event_type="expand",
+        current_node="Router",
+        frontier=["PC1", "Switch1", "Router"],
+        explored=["PC1", "Switch1"],
+        data={"g": 3.0, "h": 2.0, "f": 5.0, "threshold": 6.0},
+    )
+
+    rows = view._monitor_rows(step, show_details=True)
+
+    assert rows[:5] == [
+        ("Đang xét", "Router"),
+        ("g(n)", "3.00"),
+        ("h(n)", "2.00"),
+        ("f(n)=g+h", "5.00"),
+        ("Ngưỡng f", "6.00"),
+    ]
+
+
+def test_log_view_can_scroll_back_down_after_reaching_top(monkeypatch) -> None:
+    pygame.init()
+    surface = pygame.Surface((320, 180))
+    view = LogView(pygame.Rect(0, 0, 300, 150))
+    log = EventLog()
+    for idx in range(24):
+        log.log(
+            f"[Bước {idx:03d}] Dòng nhật ký thuật toán rất dài để kiểm tra wrap và scroll trong khung hiển thị.",
+            "info",
+        )
+
+    monkeypatch.setattr(pygame.mouse, "get_pos", lambda: (20, 20))
+    view.update(log)
+    view.draw(surface)
+    bottom_scroll = view._scroll
+    assert bottom_scroll > 0
+
+    for _ in range(100):
+        view.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, {"y": 1}))
+    view.draw(surface)
+    assert view._scroll == 0
+
+    view.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, {"y": -1}))
+    view.draw(surface)
+    assert 0 < view._scroll <= bottom_scroll
 
 
 def test_seed_reproducibility_for_random_algorithm() -> None:

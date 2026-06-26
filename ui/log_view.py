@@ -26,19 +26,25 @@ class LogView:
     def __init__(self, rect: pygame.Rect) -> None:
         self.rect = rect
         self._scroll = 0
+        self._follow_tail = True
+        self._last_entry_count = 0
         self._entries: List[LogEntry] = []
 
     def update(self, log: EventLog) -> None:
         self._entries = log.get_all()
-        max_visible = max(1, (self.rect.height - 42) // self.LINE_HEIGHT)
-        if len(self._entries) > max_visible:
-            self._scroll = len(self._entries) - max_visible
+        if len(self._entries) != self._last_entry_count and self._follow_tail:
+            self._scroll = 10**9
+        if not self._entries:
+            self._scroll = 0
+            self._follow_tail = True
+        self._last_entry_count = len(self._entries)
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if not self.rect.collidepoint(pygame.mouse.get_pos()):
             return
         if event.type == pygame.MOUSEWHEEL:
-            self._scroll = max(0, self._scroll - event.y * 2)
+            self._scroll = max(0, self._scroll - event.y * 3)
+            self._follow_tail = False
 
     def draw(self, surface: pygame.Surface) -> None:
         draw_panel(surface, self.rect, "Nhật ký thuật toán")
@@ -54,10 +60,10 @@ class LogView:
                 visual_lines.append((entry, line, line_idx == 0))
 
         max_visible = max(1, clip.height // self.LINE_HEIGHT)
-        if len(visual_lines) > max_visible:
-            start = max(0, len(visual_lines) - max_visible - max(0, self._scroll - max(0, len(self._entries) - max_visible)))
-        else:
-            start = 0
+        max_scroll = max(0, len(visual_lines) - max_visible)
+        self._scroll = max(0, min(self._scroll, max_scroll))
+        self._follow_tail = self._scroll >= max_scroll
+        start = self._scroll
         visible = visual_lines[start:start + max_visible]
         for i, (entry, line, is_first_line) in enumerate(visible):
             y = clip.y + i * self.LINE_HEIGHT

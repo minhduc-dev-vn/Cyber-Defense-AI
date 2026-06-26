@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 import pygame
 
@@ -471,7 +471,7 @@ class App:
         run.steps.append(step)
         run.current_step_index = len(run.steps) - 1
         run.metrics = self._metrics_from_step(step, success=(step.event_type == "found"))
-        run.log.log(step.message, "success" if step.event_type == "found" else "info")
+        run.log.log(self._format_step_log(step), self._log_level_for_step(step))
         self.log_view.update(run.log)
 
         if step.event_type == "found":
@@ -488,6 +488,344 @@ class App:
             return False
 
         return True
+
+    def _log_level_for_step(self, step: StepEvent) -> str:
+        if step.event_type == "found":
+            return "success"
+        if step.event_type in {"failure"} or self._looks_like_no_path_step(step):
+            return "error"
+        if step.event_type in {"backtrack"}:
+            return "warn"
+        if step.data.get("accepted") is False:
+            return "warn"
+        return "info"
+
+    def _looks_like_no_path_step(self, step: StepEvent) -> bool:
+        text = step.message.lower()
+        no_path_words = ("no path", "không tìm thấy", "khong tim thay", "không tìm được")
+        return any(word in text for word in no_path_words) or (
+            step.event_type == "info"
+            and not step.current_node
+            and not step.frontier
+            and bool(step.explored)
+        )
+
+    def _format_step_log(self, step: StepEvent) -> str:
+        group = self.state.selected_group_index
+        if group == 0:
+            return self._format_pathfinding_log(step, informed=False)
+        if group == 1:
+            return self._format_pathfinding_log(step, informed=True)
+        if group == 2:
+            return self._format_local_search_log(step)
+        if group == 3:
+            return self._format_csp_log(step)
+        if group == 4:
+            return self._format_complex_env_log(step)
+        if group == 5:
+            return self._format_adversarial_log(step)
+        return step.message
+
+    def _step_prefix(self, step: StepEvent) -> str:
+        return f"[Bước {step.step_index:03d}] {step.algorithm}:"
+
+    def _format_list(self, values: Any, limit: int = 5) -> str:
+        if values is None:
+            return "-"
+        if isinstance(values, (str, int, float)):
+            return str(values)
+        items = list(values)
+        if not items:
+            return "-"
+        shown = [str(item) for item in items[:limit]]
+        suffix = f", +{len(items) - limit}" if len(items) > limit else ""
+        return ", ".join(shown) + suffix
+
+    def _format_path(self, path: list[str]) -> str:
+        return " -> ".join(path) if path else "-"
+
+    def _format_number(self, value: Any) -> str:
+        if value is None:
+            return "-"
+        if isinstance(value, float):
+            return f"{value:.2f}"
+        return str(value)
+
+    def _format_pathfinding_log(self, step: StepEvent, *, informed: bool) -> str:
+        prefix = self._step_prefix(step)
+        current = step.current_node or "-"
+        frontier = self._format_list(step.frontier)
+        explored_count = len(step.explored)
+        data = step.data
+
+        if step.event_type == "found":
+            cost = step.total_cost if step.total_cost else max(0, len(step.path) - 1)
+            return (
+                f"{prefix} đạt Goal {current}; "
+                f"đường đi tối ưu/theo chiến lược: {self._format_path(step.path)}; "
+                f"chi phí={self._format_number(cost)}."
+            )
+        if step.event_type == "failure" or self._looks_like_no_path_step(step):
+            return f"{prefix} frontier rỗng; không còn trạng thái ứng viên để đi tới Goal."
+        if step.event_type == "info":
+            if informed:
+                score = self._score_text(data)
+                strategy = {
+                    "Greedy": "chọn node có h(n) nhỏ nhất",
+                    "A*": "chọn node có f(n)=g(n)+h(n) nhỏ nhất",
+                    "IDA*": "DFS giới hạn bởi ngưỡng f(n)",
+                }.get(step.algorithm, "tìm kiếm có heuristic")
+                return (
+                    f"{prefix} khởi tạo tìm kiếm heuristic: {strategy}; Start={current}; "
+                    f"Goal={self._format_list(self._current_goals())}; {score}; frontier={frontier}."
+                )
+            queue_name = {
+                "BFS": "queue FIFO, duyệt theo chiều rộng",
+                "DFS": "stack LIFO, duyệt theo chiều sâu",
+                "UCS": "priority queue, ưu tiên chi phí g(n) nhỏ nhất",
+            }.get(step.algorithm, "frontier")
+            return (
+                f"{prefix} khởi tạo {queue_name}; Start={current}; "
+                f"Goal={self._format_list(self._current_goals())}; không dùng heuristic."
+            )
+        if informed:
+            score = self._score_text(data)
+            if "previous_threshold" in data:
+                return (
+                    f"{prefix} IDA* chưa tìm thấy trong ngưỡng cũ; "
+                    f"tăng threshold từ {self._format_number(data.get('previous_threshold'))} "
+                    f"lên {self._format_number(data.get('threshold'))}; đã duyệt={explored_count}."
+                )
+            return (
+                f"{prefix} mở rộng {current} theo hàm đánh giá; "
+                f"{score}; frontier={frontier}; closed={explored_count}; "
+                f"đã sinh={step.nodes_generated}."
+            )
+        return (
+            f"{prefix} lấy {current} khỏi cấu trúc frontier và mở rộng láng giềng; "
+            f"frontier={frontier}; visited={explored_count}; đã sinh={step.nodes_generated}."
+        )
+
+    def _score_text(self, data: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key in ("g", "h", "f", "threshold"):
+            if key in data:
+                parts.append(f"{key}={self._format_number(data.get(key))}")
+        return ", ".join(parts) if parts else "điểm đánh giá=-"
+
+    def _format_local_search_log(self, step: StepEvent) -> str:
+        prefix = self._step_prefix(step)
+        data = step.data
+        value = data.get("defense_value")
+        risk = data.get("risk_cost")
+        blocked = data.get("blocked_paths")
+        open_paths = data.get("open_paths")
+        config = data.get("defense_config")
+        config_text = self._format_defense_config(config)
+
+        if step.event_type == "info":
+            objective = "tối đa DefenseValue" if step.algorithm != "Simulated Annealing" else "tối thiểu RiskCost"
+            return (
+                f"{prefix} khởi tạo bài toán tối ưu cục bộ ({objective}); {config_text}; "
+                f"DefenseValue={self._format_number(value)}, RiskCost={self._format_number(risk)}."
+            )
+        if step.event_type == "found":
+            if step.algorithm == "Simulated Annealing":
+                return (
+                    f"{prefix} kết thúc Simulated Annealing; cấu hình tốt nhất {config_text}; "
+                    f"RiskCost={self._format_number(risk)}, DefenseValue={self._format_number(value)}, "
+                    f"đường bị chặn={self._format_number(blocked)}, đường còn mở={self._format_number(open_paths)}."
+                )
+            optimum = "cực đại cục bộ" if step.algorithm in {"Simple HC", "Steepest HC"} else "nghiệm tốt nhất"
+            return (
+                f"{prefix} đạt {optimum} cho cấu hình phòng thủ; {config_text}; "
+                f"DefenseValue={self._format_number(value)}, RiskCost={self._format_number(risk)}, "
+                f"đường bị chặn={self._format_number(blocked)}, đường còn mở={self._format_number(open_paths)}."
+            )
+        if step.algorithm == "Simulated Annealing":
+            accepted = data.get("accepted")
+            decision = "chấp nhận trạng thái mới" if accepted else "từ chối trạng thái mới"
+            if accepted is None:
+                decision = "kết thúc"
+            return (
+                f"{prefix} SA lấy mẫu một láng giềng và đánh giá theo RiskCost; "
+                f"RiskCost={self._format_number(risk)}, "
+                f"delta={self._format_number(data.get('delta'))}, "
+                f"T={self._format_number(data.get('temperature'))}, "
+                f"xác suất chấp nhận={self._format_number(data.get('accept_probability'))}; "
+                f"{decision}; best RiskCost={self._format_number(data.get('best_risk'))}."
+            )
+        if step.event_type == "move":
+            move_text = "chọn láng giềng tốt nhất" if step.algorithm == "Steepest HC" else "chấp nhận láng giềng cải thiện đầu tiên"
+            return (
+                f"{prefix} {move_text}; {config_text}; "
+                f"DefenseValue={self._format_number(value)}, RiskCost={self._format_number(risk)}."
+            )
+        checked = data.get("neighbors_checked")
+        checked_text = f"; đã xét toàn bộ {checked} láng giềng" if checked is not None else ""
+        return (
+            f"{prefix} đánh giá trạng thái láng giềng trong không gian cấu hình{checked_text}; {config_text}; "
+            f"DefenseValue={self._format_number(value)}, RiskCost={self._format_number(risk)}."
+        )
+
+    def _format_defense_config(self, config: Any) -> str:
+        if not config:
+            return "Firewall=-; IDS=-; Nâng cấp=-"
+        return (
+            f"Firewall={self._format_list(getattr(config, 'firewall_nodes', []), 3)}; "
+            f"IDS={self._format_list(getattr(config, 'ids_nodes', []), 3)}; "
+            f"Nâng cấp={self._format_list(getattr(config, 'upgraded_nodes', []), 3)}"
+        )
+
+    def _format_csp_log(self, step: StepEvent) -> str:
+        prefix = self._step_prefix(step)
+        data = step.data
+        assignments = data.get("assignments", {})
+        current = step.current_node or "-"
+        current_value = assignments.get(current, "-") if isinstance(assignments, dict) else "-"
+        conflicts = data.get("conflicts", [])
+        removed = data.get("removed", {})
+        assigned_count = len(assignments) if isinstance(assignments, dict) else 0
+
+        if step.event_type == "info":
+            domains = data.get("domains", {})
+            return (
+                f"{prefix} khởi tạo CSP phân vùng mạng; "
+                f"biến={len(domains)}, miền giá trị là các Security Zone; ràng buộc dựa trên liên kết mạng."
+            )
+        if step.event_type == "assign":
+            attempt = self._assignment_attempt(step, current)
+            verdict = "nhất quán tạm thời" if not conflicts else f"vi phạm {len(conflicts)} ràng buộc"
+            return (
+                f"{prefix} kiểm tra phép gán {current}={attempt}; "
+                f"kết quả {verdict}; số biến đã gán={assigned_count}."
+            )
+        if step.event_type == "update":
+            prune_text = f"; loại miền {self._format_domain_removal(removed)}" if removed else ""
+            return (
+                f"{prefix} chấp nhận gán {current}={current_value}{prune_text}; "
+                f"tiếp tục lan truyền ràng buộc; đã gán={assigned_count}."
+            )
+        if step.event_type == "backtrack":
+            return (
+                f"{prefix} backtrack tại biến {current}; khôi phục miền/lựa chọn trước; "
+                f"số lần quay lui={data.get('backtracks', 0)}."
+            )
+        if step.event_type == "found":
+            return f"{prefix} tìm thấy nghiệm CSP; mọi biến đã được gán và thỏa toàn bộ ràng buộc; biến={assigned_count}."
+        return f"{prefix} không tìm được nghiệm CSP hợp lệ; xung đột còn lại={len(conflicts)}."
+
+    def _assignment_attempt(self, step: StepEvent, current: str) -> str:
+        marker = f"{current} = "
+        if marker not in step.message:
+            return "-"
+        value = step.message.split(marker, 1)[1].split(".", 1)[0].strip()
+        return value or "-"
+
+    def _format_domain_removal(self, removed: Any) -> str:
+        if not isinstance(removed, dict) or not removed:
+            return "-"
+        parts = [f"{node}:{self._format_list(values, 3)}" for node, values in list(removed.items())[:3]]
+        if len(removed) > 3:
+            parts.append(f"+{len(removed) - 3}")
+        return "; ".join(parts)
+
+    def _format_complex_env_log(self, step: StepEvent) -> str:
+        prefix = self._step_prefix(step)
+        data = step.data
+        belief = data.get("belief", [])
+        blocked = data.get("blocked_nodes", [])
+        plan = data.get("plan") or data.get("plan_lines") or []
+        observed = data.get("observed_nodes", [])
+
+        if step.algorithm == "AND-OR":
+            if step.event_type == "found":
+                return (
+                    f"{prefix} tìm được kế hoạch điều kiện AND-OR bảo đảm an toàn; "
+                    f"đỉnh đã xét={step.nodes_expanded}; kế hoạch={self._format_list(plan, 2)}."
+                )
+            if step.event_type == "failure":
+                return f"{prefix} không có kế hoạch điều kiện an toàn cho mọi nhánh kết quả."
+            return (
+                f"{prefix} mở rộng cây AND-OR trên belief={self._format_list(belief)}; "
+                f"xét nhánh hành động/kết quả: {self._format_list(plan, 1)}."
+            )
+
+        if step.event_type == "info":
+            extra = f"; vùng quan sát={self._format_list(observed)}" if observed else ""
+            mode = "quan sát một phần" if observed else "không quan sát trực tiếp"
+            return (
+                f"{prefix} khởi tạo trạng thái niềm tin trong môi trường {mode}; "
+                f"vị trí Hacker có thể={self._format_list(belief)}{extra}."
+            )
+        if "previous_belief" in data:
+            return (
+                f"{prefix} cập nhật belief bằng quan sát IDS/Bayes-style filtering; "
+                f"{self._format_list(data.get('previous_belief'))} -> {self._format_list(belief)}."
+            )
+        if step.event_type == "found":
+            return f"{prefix} tìm được kế hoạch phòng thủ an toàn cho mọi trạng thái trong belief; chặn={self._format_list(blocked)}."
+        if step.event_type == "failure":
+            return f"{prefix} chưa tìm được kế hoạch bảo đảm an toàn với belief hiện tại."
+        return (
+            f"{prefix} áp dụng hành động phòng thủ theo belief-state search; "
+            f"chặn={self._format_list(blocked)}; belief={self._format_list(belief)}."
+        )
+
+    def _format_adversarial_log(self, step: StepEvent) -> str:
+        prefix = self._step_prefix(step)
+        data = step.data
+        action = self._format_action(data.get("action"))
+        value = data.get("expected_value", data.get("evaluation", step.total_cost))
+        turn = data.get("turn", "hacker")
+        depth = data.get("depth", "-")
+
+        if step.event_type == "info":
+            if step.algorithm == "Expectimax":
+                return (
+                    f"{prefix} khởi tạo Expectimax với nút xác suất IDS/chance node; "
+                    f"lượt={turn}, độ sâu={depth}, outcomes={self._format_list(data.get('chance_outcomes'), 2)}."
+                )
+            if step.algorithm == "Alpha-Beta":
+                return (
+                    f"{prefix} khởi tạo Minimax có Alpha-Beta Pruning; "
+                    f"Hacker(MAX), Defender(MIN), độ sâu={depth}, alpha=-inf, beta=inf."
+                )
+            return f"{prefix} khởi tạo cây trò chơi Minimax: Hacker(MAX) - Defender(MIN); lượt={turn}, độ sâu={depth}."
+        if step.event_type == "found":
+            return f"{prefix} chọn hành động tối ưu theo utility: {action}; giá trị đánh giá={self._format_number(value)}."
+        if step.algorithm == "Alpha-Beta":
+            return (
+                f"{prefix} xét nhánh {action}; utility={self._format_number(value)}, "
+                f"alpha={self._format_number(data.get('alpha'))}, beta={self._format_number(data.get('beta'))}, "
+                f"số nhánh đã cắt={data.get('pruned_branches', 0)}."
+            )
+        if step.algorithm == "Expectimax":
+            return (
+                f"{prefix} xét hành động {action}; expected utility={self._format_number(value)} "
+                f"sau khi tổng hợp các nhánh xác suất IDS."
+            )
+        return (
+            f"{prefix} xét hành động {action}; utility Minimax={self._format_number(value)}; "
+            f"đã đánh giá={step.nodes_expanded} trạng thái."
+        )
+
+    def _format_action(self, action: Any) -> str:
+        if not action:
+            return "không hành động"
+        action_type = getattr(action, "action_type", "")
+        target = getattr(action, "target", "")
+        if action_type == "move":
+            return f"Hacker di chuyển tới {target}"
+        if action_type == "block_node":
+            return f"Defender chặn node {target}"
+        if action_type == "block_edge":
+            return f"Defender chặn cạnh {target.replace('|', '-')}"
+        if action_type == "upgrade":
+            return f"Defender nâng cấp {target}"
+        if action_type == "detect":
+            return "IDS phát hiện Hacker" if target == "detected" else "IDS bỏ sót Hacker"
+        return getattr(action, "description", str(action))
 
     def _is_failure_step(self, step: StepEvent) -> bool:
         if step.event_type == "failure":
