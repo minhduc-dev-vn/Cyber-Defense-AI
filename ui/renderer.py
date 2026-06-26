@@ -68,6 +68,11 @@ class GraphRenderer:
         final_path: list[str] = step.path if step else []
         current: Optional[str] = step.current_node if step else None
         final_edges: Set[tuple[str, str]] = set()
+        assignments = step.data.get("assignments", {}) if step else {}
+        defense_config = step.data.get("defense_config") if step else None
+        firewall_nodes = set(getattr(defense_config, "firewall_nodes", []))
+        ids_nodes = set(getattr(defense_config, "ids_nodes", []))
+        upgraded_nodes = set(getattr(defense_config, "upgraded_nodes", []))
 
         # Tập edge thuộc final path
         if final_path:
@@ -128,15 +133,15 @@ class GraphRenderer:
             else:
                 state = "default"
 
-            # Override màu cho goal nodes
             if node.kind in ("server", "database"):
                 base_color = get_node_color(node.kind, "default")
             else:
                 base_color = get_node_color(node.kind, state)
 
-            # Nếu là goal và đang là final path, giữ màu tím
             if node.id in goal_nodes:
                 base_color = get_node_color(node.kind, "default")
+            if node.id in assignments:
+                base_color = CSP_ZONE_COLORS.get(assignments[node.id], base_color)
 
             # Vẽ viền (highlight node đang chọn hoặc hover)
             if node.id == selected_node:
@@ -159,6 +164,13 @@ class GraphRenderer:
             else:
                 pygame.draw.circle(self.surface, COLOR_PANEL_BORDER, (nx, ny), r, 1)
 
+            if node.id in firewall_nodes:
+                pygame.draw.circle(self.surface, (255, 145, 45), (nx, ny), r + 5, 3)
+            if node.id in ids_nodes:
+                pygame.draw.circle(self.surface, (255, 220, 70), (nx, ny), r + 9, 2)
+            if node.id in upgraded_nodes:
+                pygame.draw.circle(self.surface, (80, 220, 220), (nx, ny), r - 6, 3)
+
             # Icon đặc biệt cho từng loại node
             self._draw_node_icon(node.kind, nx, ny, r)
 
@@ -172,6 +184,13 @@ class GraphRenderer:
             if node.blocked:
                 pygame.draw.line(self.surface, (200, 50, 50), (nx - 10, ny - 10), (nx + 10, ny + 10), 2)
                 pygame.draw.line(self.surface, (200, 50, 50), (nx + 10, ny - 10), (nx - 10, ny + 10), 2)
+
+            if node.id in assignments:
+                zone_font = get_font(9)
+                zone = str(assignments[node.id]).replace(" Zone", "")
+                zone_surf = zone_font.render(zone[:10], True, COLOR_TEXT_SECONDARY)
+                zw, _ = zone_surf.get_size()
+                self.surface.blit(zone_surf, (nx - zw // 2, ny + r + 16))
 
     def _draw_node_icon(self, kind: str, cx: int, cy: int, r: int) -> None:
         """Vẽ icon nhỏ bên trong node theo loại."""

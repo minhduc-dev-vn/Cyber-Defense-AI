@@ -121,8 +121,8 @@ class App:
             return
 
         group = self.state.selected_group_index
-        if group not in (0, 1):
-            self._show_toast("Compare is ready for groups 1 and 2")
+        if group not in (0, 1, 2, 3):
+            self._show_toast("Compare is ready for groups 1-4")
             return
 
         self._step_gen = None
@@ -171,6 +171,26 @@ class App:
             from algorithms.informed.idastar import solve_steps
             return "IDA*", solve_steps
 
+        if group == 2:
+            if algo_idx == 0:
+                from algorithms.local_search.simple_hill_climbing import solve_steps
+                return "Simple HC", solve_steps
+            if algo_idx == 1:
+                from algorithms.local_search.steepest_hill_climbing import solve_steps
+                return "Steepest HC", solve_steps
+            from algorithms.local_search.simulated_annealing import solve_steps
+            return "Simulated Annealing", solve_steps
+
+        if group == 3:
+            if algo_idx == 0:
+                from algorithms.csp.backtracking import solve_steps
+                return "Backtracking", solve_steps
+            if algo_idx == 1:
+                from algorithms.csp.forward_checking import solve_steps
+                return "Forward Checking", solve_steps
+            from algorithms.csp.min_conflicts import solve_steps
+            return "Min-Conflicts", solve_steps
+
         raise ValueError(f"Group {group + 1} is not implemented yet")
 
     def _algorithm_run_specs(self, group: int) -> list[tuple[str, Callable]]:
@@ -184,6 +204,24 @@ class App:
                 ("A*", astar.run),
                 ("IDA*", idastar.run),
             ]
+        if group == 2:
+            from algorithms.local_search import (
+                simple_hill_climbing,
+                simulated_annealing,
+                steepest_hill_climbing,
+            )
+            return [
+                ("Simple HC", simple_hill_climbing.run),
+                ("Steepest HC", steepest_hill_climbing.run),
+                ("Sim. Annealing", simulated_annealing.run),
+            ]
+        if group == 3:
+            from algorithms.csp import backtracking, forward_checking, min_conflicts
+            return [
+                ("Backtracking", backtracking.run),
+                ("Forward Checking", forward_checking.run),
+                ("Min-Conflicts", min_conflicts.run),
+            ]
         return []
 
     def _run_compare_algorithms(self, group: int) -> list[AlgorithmResult]:
@@ -192,8 +230,23 @@ class App:
         start = self._map_data.hacker_start
         goals = self._map_data.goal_nodes
         results: list[AlgorithmResult] = []
+        seed = self._current_seed()
         for expected_name, run_func in self._algorithm_run_specs(group):
-            result = run_func(graph, start, goals)
+            if group == 2 and expected_name == "Sim. Annealing":
+                result = run_func(
+                    graph,
+                    start,
+                    goals,
+                    seed=seed,
+                    t0=self.state.sa_t0,
+                    alpha=self.state.sa_alpha,
+                    tmin=self.state.sa_tmin,
+                    max_steps=min(self.state.sa_max_steps, 120),
+                )
+            elif group == 3 and expected_name == "Min-Conflicts":
+                result = run_func(graph, start, goals, seed=seed, max_steps=300)
+            else:
+                result = run_func(graph, start, goals)
             result.metrics.algorithm = expected_name
             results.append(result)
         return results
@@ -218,13 +271,42 @@ class App:
             return
 
         run.algorithm_name = name
-        self._step_gen = solve_steps(
-            self._map_data.graph,
-            self._map_data.hacker_start,
-            self._map_data.goal_nodes,
-        )
+        seed = self._current_seed()
+        if group == 2 and algo_idx == 2:
+            self._step_gen = solve_steps(
+                self._map_data.graph,
+                self._map_data.hacker_start,
+                self._map_data.goal_nodes,
+                seed=seed,
+                t0=self.state.sa_t0,
+                alpha=self.state.sa_alpha,
+                tmin=self.state.sa_tmin,
+                max_steps=self.state.sa_max_steps,
+            )
+        elif group == 3 and algo_idx == 2:
+            self._step_gen = solve_steps(
+                self._map_data.graph,
+                self._map_data.hacker_start,
+                self._map_data.goal_nodes,
+                seed=seed,
+                max_steps=300,
+            )
+        else:
+            self._step_gen = solve_steps(
+                self._map_data.graph,
+                self._map_data.hacker_start,
+                self._map_data.goal_nodes,
+            )
         run.log.clear()
         run.status = "ready"
+
+    def _current_seed(self) -> int:
+        try:
+            value = int(self.control_panel.seed_input.value)
+        except (AttributeError, TypeError, ValueError):
+            value = self.state.random_seed
+        self.state.random_seed = value
+        return value
 
     def _do_one_step(self) -> bool:
         run = self.state.run_state
@@ -250,14 +332,14 @@ class App:
         if step.event_type == "found":
             run.status = "success"
             self._step_gen = None
-            self._show_toast("Path found")
+            self._show_toast(f"{step.algorithm} completed")
             return False
 
         if self._is_failure_step(step):
             run.status = "failure"
             run.metrics = self._metrics_from_step(step, success=False)
             self._step_gen = None
-            self._show_toast("No path found")
+            self._show_toast(f"{step.algorithm} failed")
             return False
 
         return True

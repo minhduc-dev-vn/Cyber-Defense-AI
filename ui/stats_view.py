@@ -85,6 +85,25 @@ class StatsView:
                         else:
                             text = str(value)
                         lines.append((f"{key}:", text, COLOR_TEXT_WARNING))
+                for key, label in (
+                    ("defense_value", "Value"),
+                    ("risk_cost", "Risk"),
+                    ("open_paths", "Open"),
+                    ("blocked_paths", "Blocked"),
+                    ("conflicts", "Conflicts"),
+                    ("backtracks", "Backtracks"),
+                    ("temperature", "Temp"),
+                    ("accepted_worse_moves", "Worse"),
+                ):
+                    if key in step.data:
+                        value = step.data[key]
+                        if isinstance(value, list):
+                            text = str(len(value))
+                        elif isinstance(value, float):
+                            text = format_cost(value)
+                        else:
+                            text = str(value)
+                        lines.append((f"{label}:", text, COLOR_TEXT_WARNING))
         elif metrics:
             lines.append(("Algorithm:", metrics.algorithm, COLOR_TEXT_PRIMARY))
             lines.append(("Result:", "OK" if metrics.success else "Fail", COLOR_TEXT_SUCCESS if metrics.success else COLOR_TEXT_ERROR))
