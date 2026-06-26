@@ -51,23 +51,23 @@ GROUP_MAPS = [
 ]
 
 ALGO_LABELS = {
-    "BFS": "BFS - Tìm theo chiều rộng",
-    "DFS": "DFS - Tìm theo chiều sâu",
-    "UCS": "UCS - Chi phí đều",
-    "Greedy": "Greedy - Tham lam",
-    "A*": "A* - Tìm kiếm A sao",
-    "IDA*": "IDA* - Lặp sâu A sao",
-    "Simple HC": "Leo đồi đơn giản",
-    "Steepest HC": "Leo đồi dốc nhất",
-    "Sim. Annealing": "Ủ nhiệt mô phỏng",
-    "Backtracking": "Quay lui",
-    "Fwd Checking": "Kiểm tra tiến",
-    "Min-Conflicts": "Xung đột tối thiểu",
-    "Belief Unobs.": "Niềm tin không quan sát",
-    "Belief Partial": "Niềm tin quan sát một phần",
-    "AND-OR": "Tìm kiếm AND-OR",
+    "BFS": "Breadth-First Search",
+    "DFS": "Depth-First Search",
+    "UCS": "Uniform Cost Search",
+    "Greedy": "Greedy Best-First Search",
+    "A*": "A* Search",
+    "IDA*": "Iterative Deepening A*",
+    "Simple HC": "Simple Hill Climbing",
+    "Steepest HC": "Steepest Ascent Hill Climbing",
+    "Sim. Annealing": "Simulated Annealing",
+    "Backtracking": "Backtracking",
+    "Fwd Checking": "Forward Checking",
+    "Min-Conflicts": "Min-Conflicts",
+    "Belief Unobs.": "Belief-State Search",
+    "Belief Partial": "Partial-Observable Belief Search",
+    "AND-OR": "AND-OR Graph Search",
     "Minimax": "Minimax",
-    "Alpha-Beta": "Cắt tỉa Alpha-Beta",
+    "Alpha-Beta": "Alpha-Beta Pruning",
     "Expectimax": "Expectimax",
 }
 
@@ -107,6 +107,8 @@ class ControlPanel:
         on_compare: Optional[Callable] = None,
         on_algo_change: Optional[Callable] = None,
         on_map_change: Optional[Callable] = None,
+        on_start_node_change: Optional[Callable] = None,
+        on_goal_node_change: Optional[Callable] = None,
     ) -> None:
         self.rect = rect
         self.app_state = app_state
@@ -117,6 +119,8 @@ class ControlPanel:
         self._on_compare = on_compare
         self._on_algo_change = on_algo_change
         self._on_map_change = on_map_change
+        self._on_start_node_change = on_start_node_change
+        self._on_goal_node_change = on_goal_node_change
         self._algo_buttons: list[Button] = []
         self._speed_buttons: list[Button] = []
         self._build_widgets()
@@ -165,8 +169,29 @@ class ControlPanel:
             selected_index=map_index,
             on_change=self._on_map_change_internal,
         )
-        mini_y = y + 36
-        mini_h = max(76, self._controls_y - mini_y - 18)
+
+        node_options = self._node_options()
+        start_index = self._node_index(node_options, self.app_state.selected_start_node)
+        goal_index = self._node_index(node_options, self.app_state.selected_goal_node)
+        node_gap = 8
+        node_w = (w - node_gap) // 2
+        node_label_y = y + 38
+        node_dropdown_y = node_label_y + 18
+        self.start_dropdown = Dropdown(
+            pygame.Rect(x, node_dropdown_y, node_w, 28),
+            node_options,
+            selected_index=start_index,
+            on_change=self._on_start_node_change_internal,
+        )
+        self.goal_dropdown = Dropdown(
+            pygame.Rect(x + node_w + node_gap, node_dropdown_y, node_w, 28),
+            node_options,
+            selected_index=goal_index,
+            on_change=self._on_goal_node_change_internal,
+        )
+
+        mini_y = node_dropdown_y + 36
+        mini_h = max(48, self._controls_y - mini_y - 14)
         self._mini_rect = pygame.Rect(x, mini_y, w, mini_h)
 
         cy = self._controls_y + 28
@@ -199,6 +224,17 @@ class ControlPanel:
                 color=(9, 31, 55),
             )
 
+    def _node_options(self) -> list[str]:
+        map_data = self.app_state.map_data
+        if not map_data:
+            return []
+        return [node.id for node in map_data.graph.get_all_nodes()]
+
+    def _node_index(self, options: list[str], selected: Optional[str]) -> int:
+        if selected in options:
+            return options.index(selected)
+        return 0
+
     def _select_algo_button(self, idx: int, name: str) -> None:
         self.app_state.selected_algo_index = idx
         self.algo_dropdown.selected_index = idx
@@ -226,6 +262,19 @@ class ControlPanel:
         if self._on_map_change:
             group = self.app_state.selected_group_index
             self._on_map_change(idx, GROUP_MAPS[group][idx])
+        self._build_widgets()
+
+    def _on_start_node_change_internal(self, idx: int, node_id: str) -> None:
+        self.app_state.selected_start_node = node_id
+        if self._on_start_node_change:
+            self._on_start_node_change(idx, node_id)
+        self._build_widgets()
+
+    def _on_goal_node_change_internal(self, idx: int, node_id: str) -> None:
+        self.app_state.selected_goal_node = node_id
+        if self._on_goal_node_change:
+            self._on_goal_node_change(idx, node_id)
+        self._build_widgets()
 
     def _set_speed(self, key: str) -> None:
         self.app_state.speed_key = key
@@ -233,29 +282,32 @@ class ControlPanel:
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         consumed = False
+        dropdowns = [
+            self.algo_dropdown,
+            self.map_dropdown,
+            self.start_dropdown,
+            self.goal_dropdown,
+        ]
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.algo_dropdown.rect.collidepoint(event.pos):
-                self.map_dropdown.close()
-                return self.algo_dropdown.handle_event(event)
-            if self.map_dropdown.rect.collidepoint(event.pos):
-                self.algo_dropdown.close()
-                return self.map_dropdown.handle_event(event)
-            if self.algo_dropdown.is_open or self.map_dropdown.is_open:
-                consumed = False
-                if self.algo_dropdown.is_open:
-                    consumed |= self.algo_dropdown.handle_event(event)
-                if self.map_dropdown.is_open:
-                    consumed |= self.map_dropdown.handle_event(event)
+            for dropdown in dropdowns:
+                if dropdown.rect.collidepoint(event.pos):
+                    for other in dropdowns:
+                        if other is not dropdown:
+                            other.close()
+                    return dropdown.handle_event(event)
+            if any(dropdown.is_open for dropdown in dropdowns):
+                for dropdown in dropdowns:
+                    if dropdown.is_open:
+                        consumed |= dropdown.handle_event(event)
                 return True
         if event.type == pygame.MOUSEMOTION:
-            if self.algo_dropdown.is_open:
-                consumed |= self.algo_dropdown.handle_event(event)
-            if self.map_dropdown.is_open:
-                consumed |= self.map_dropdown.handle_event(event)
+            for dropdown in dropdowns:
+                if dropdown.is_open:
+                    consumed |= dropdown.handle_event(event)
             if consumed:
                 return True
-        consumed |= self.algo_dropdown.handle_event(event)
-        consumed |= self.map_dropdown.handle_event(event)
+        for dropdown in dropdowns:
+            consumed |= dropdown.handle_event(event)
         for button in self._algo_buttons:
             consumed |= button.handle_event(event)
         for button in self._speed_buttons:
@@ -276,6 +328,14 @@ class ControlPanel:
         self._draw_divider(surface, self._map_y - 10)
         self._draw_section(surface, 2, "CHỌN BẢN ĐỒ", self._map_y)
         self.map_dropdown.draw(surface)
+        label_font = get_font(10, bold=True)
+        label_y = self.start_dropdown.rect.y - 17
+        start_label = label_font.render("START NODE", True, COLOR_TEXT_SECONDARY)
+        goal_label = label_font.render("GOAL NODE", True, COLOR_TEXT_SECONDARY)
+        surface.blit(start_label, (self.start_dropdown.rect.x + 2, label_y))
+        surface.blit(goal_label, (self.goal_dropdown.rect.x + 2, label_y))
+        self.start_dropdown.draw(surface)
+        self.goal_dropdown.draw(surface)
         self._draw_mini_map(surface)
 
         self._draw_divider(surface, self._controls_y - 10)
@@ -290,6 +350,8 @@ class ControlPanel:
             self.btn_compare.draw(surface)
         self.algo_dropdown.draw_menu(surface)
         self.map_dropdown.draw_menu(surface)
+        self.start_dropdown.draw_menu(surface)
+        self.goal_dropdown.draw_menu(surface)
 
     def _draw_section(self, surface: pygame.Surface, index: int, title: str, y: int) -> None:
         font = get_font(13, bold=True)
@@ -328,8 +390,10 @@ class ControlPanel:
 
         for edge in map_data.graph.get_all_edges():
             pygame.draw.line(surface, COLOR_EDGE_DEFAULT, pos(edge.source), pos(edge.target), 1)
+        start_node = self.app_state.selected_start_node or map_data.hacker_start
+        goal_nodes = [self.app_state.selected_goal_node] if self.app_state.selected_goal_node else map_data.goal_nodes
         for node in nodes:
-            color = COLOR_NODE_HACKER if node.id == map_data.hacker_start else get_node_color(node.kind)
-            if node.id in map_data.goal_nodes:
+            color = COLOR_NODE_HACKER if node.id == start_node else get_node_color(node.kind)
+            if node.id in goal_nodes:
                 color = COLOR_NODE_SERVER
             pygame.draw.circle(surface, color, pos(node.id), 5)

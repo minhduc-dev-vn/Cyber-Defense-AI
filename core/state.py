@@ -77,6 +77,8 @@ class AppState:
 
     # Map và đồ thị
     map_data: Optional[Any] = None    # MapData
+    selected_start_node: Optional[str] = None
+    selected_goal_node: Optional[str] = None
 
     # Trạng thái chạy
     run_state: AlgorithmRunState = field(default_factory=AlgorithmRunState)

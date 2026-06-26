@@ -66,14 +66,15 @@ class StatsView:
             ("Đang xét", step.current_node if step and step.current_node else "-"),
         ]
         if show_details and step and step.data:
-            for key in ("g", "h", "f", "threshold", "evaluation", "expected_value", "belief", "plan"):
+            for key in ("g", "h", "f", "threshold", "evaluation", "expected_value", "defense_value", "risk_cost", "blocked_paths", "open_paths", "belief", "plan"):
                 if key in step.data:
                     value = step.data[key]
                     rows.append((key, str(len(value)) if isinstance(value, list) else str(value)))
 
         y = rect.y + 34
         visible_rows = rows[:4]
-        row_h = max(34, min(44, (rect.height - 48) // max(1, len(visible_rows))))
+        row_gap = 4
+        row_h = max(28, min(44, (rect.height - 52 - row_gap * max(0, len(visible_rows) - 1)) // max(1, len(visible_rows))))
         for label, value in visible_rows:
             row_rect = pygame.Rect(rect.x + 12, y, rect.width - 24, row_h)
             pygame.draw.rect(surface, (7, 17, 31), row_rect, border_radius=5)
@@ -86,7 +87,7 @@ class StatsView:
                 COLOR_TEXT_PRIMARY,
                 size=10,
             )
-            y += row_h + 4
+            y += row_h + row_gap
 
     def _draw_result(
         self,
@@ -116,6 +117,10 @@ class StatsView:
             "success": "Thành công",
             "failure": "Thất bại",
         }.get(status, status)
+        defense_data = self._defense_data(step, metrics)
+        if defense_data:
+            self._draw_defense_result(surface, rect, defense_data, status_color, status_label)
+            return
         rows = [
             ("Thuật toán", algorithm),
             ("Đường đi", " -> ".join(path) if path else "-"),
@@ -183,8 +188,13 @@ class StatsView:
             )
 
     def _draw_path(self, surface: pygame.Surface, rect: pygame.Rect, step: Optional[StepEvent], metrics: Optional[AlgorithmMetrics]) -> None:
-        title = get_font(13, bold=True).render("ĐƯỜNG ĐI", True, (116, 195, 255))
+        defense_data = self._defense_data(step, metrics)
+        title_text = "PHÒNG THỦ" if defense_data else "ĐƯỜNG ĐI"
+        title = get_font(13, bold=True).render(title_text, True, (116, 195, 255))
         surface.blit(title, (rect.x + 14, rect.y + 12))
+        if defense_data:
+            self._draw_defense_summary(surface, rect, defense_data)
+            return
         path = step.path if step else (metrics.path if metrics else [])
         if not path:
             draw_text_fit(surface, "Chưa có đường đi hoặc kế hoạch.", pygame.Rect(rect.x + 14, rect.y + 48, rect.width - 28, 24), COLOR_TEXT_SECONDARY, size=12)
@@ -213,6 +223,64 @@ class StatsView:
                 pygame.draw.line(surface, (8, 15, 26), start, end, 4)
                 pygame.draw.line(surface, COLOR_EDGE_DEFAULT, start, end, 2)
                 pygame.draw.polygon(surface, COLOR_EDGE_DEFAULT, [(end[0], end[1]), (end[0] - 7, end[1] - 4), (end[0] - 7, end[1] + 4)])
+
+    def _defense_data(self, step: Optional[StepEvent], metrics: Optional[AlgorithmMetrics]) -> Optional[dict]:
+        if step and step.data.get("defense_config"):
+            return step.data
+        if metrics and metrics.extra.get("defense_config"):
+            return metrics.extra
+        return None
+
+    def _draw_defense_result(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        data: dict,
+        status_color: tuple[int, int, int],
+        status_label: str,
+    ) -> None:
+        protected = data.get("protected_nodes", [])
+        protected_text = ", ".join(protected[:3]) if isinstance(protected, list) else str(protected)
+        rows = [
+            ("DefenseValue", str(data.get("defense_value", "-"))),
+            ("RiskCost", str(data.get("risk_cost", "-"))),
+            ("Chặn đường", str(data.get("blocked_paths", "-"))),
+            ("Còn mở", str(data.get("open_paths", "-"))),
+            ("Bảo vệ", protected_text or "-"),
+            ("Trạng thái", status_label),
+        ]
+        y = rect.y + 36
+        label_w = 112
+        for label, value in rows:
+            row_h = 18
+            color = status_color if label == "Trạng thái" else COLOR_TEXT_PRIMARY
+            draw_text_fit(surface, label + ":", pygame.Rect(rect.x + 14, y, label_w, row_h), COLOR_TEXT_PRIMARY, size=8, bold=True)
+            draw_text_fit(surface, value, pygame.Rect(rect.x + 14 + label_w, y, rect.width - label_w - 28, row_h), color, size=8)
+            y += row_h
+
+    def _draw_defense_summary(self, surface: pygame.Surface, rect: pygame.Rect, data: dict) -> None:
+        config = data.get("defense_config")
+        rows = [
+            ("Firewall", getattr(config, "firewall_nodes", []), COLOR_TEXT_WARNING),
+            ("IDS", getattr(config, "ids_nodes", []), (90, 170, 255)),
+            ("Nâng cấp", getattr(config, "upgraded_nodes", []), COLOR_TEXT_SUCCESS),
+        ]
+        y = rect.y + 40
+        for label, nodes, color in rows:
+            node_text = ", ".join(nodes) if nodes else "-"
+            draw_text_fit(surface, label + ":", pygame.Rect(rect.x + 14, y, 92, 18), color, size=8, bold=True)
+            self._draw_wrapped_text(
+                surface,
+                node_text,
+                pygame.Rect(rect.x + 106, y, rect.width - 120, 26),
+                COLOR_TEXT_PRIMARY,
+                size=7,
+            )
+            y += 30
+
+        y = min(y + 4, rect.bottom - 40)
+        draw_text_fit(surface, f"Đường bị chặn: {data.get('blocked_paths', '-')}", pygame.Rect(rect.x + 14, y, rect.width - 28, 18), COLOR_TEXT_PRIMARY, size=8, bold=True)
+        draw_text_fit(surface, f"Đường còn mở: {data.get('open_paths', '-')}", pygame.Rect(rect.x + 14, y + 20, rect.width - 28, 18), COLOR_TEXT_PRIMARY, size=8, bold=True)
 
     def _draw_compare(self, surface: pygame.Surface, compare_results: list[AlgorithmResult]) -> None:
         title = get_font(13, bold=True).render("SO SÁNH", True, (116, 195, 255))

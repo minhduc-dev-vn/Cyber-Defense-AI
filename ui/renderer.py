@@ -28,6 +28,7 @@ from ui.theme import (
     COLOR_TEXT_SECONDARY,
     COLOR_PANEL_BORDER,
     COLOR_NODE_HACKER,
+    COLOR_NODE_SERVER,
     COLOR_FINAL_PATH,
     COLOR_FRONTIER,
     COLOR_CURRENT,
@@ -180,7 +181,7 @@ class GraphRenderer:
                 base_color = get_node_color(node.kind, state)
 
             if node.id in goal_nodes:
-                base_color = get_node_color(node.kind, "default")
+                base_color = COLOR_NODE_SERVER
             if node.id in assignments:
                 base_color = CSP_ZONE_COLORS.get(assignments[node.id], base_color)
 

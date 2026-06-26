@@ -96,6 +96,8 @@ class App:
             on_compare=self._on_compare,
             on_algo_change=self._on_algo_change,
             on_map_change=self._on_map_change,
+            on_start_node_change=self._on_start_node_change,
+            on_goal_node_change=self._on_goal_node_change,
         )
 
         self._step_gen: Optional[Iterator[StepEvent]] = None
@@ -110,6 +112,8 @@ class App:
             self._map_data = load_map(path)
             self.state.map_data = self._map_data
             self.state.selected_map_name = map_name
+            self.state.selected_start_node = self._map_data.hacker_start
+            self.state.selected_goal_node = self._map_data.goal_nodes[0] if self._map_data.goal_nodes else None
             self._show_toast(f"Đã tải bản đồ: {map_label(map_name)}")
             return True
         except MapLoadError as exc:
@@ -182,6 +186,38 @@ class App:
         if self._load_map(name) and self._map_data:
             self.graph_view.set_graph(self._map_data.graph)
         self._on_reset()
+
+    def _on_start_node_change(self, idx: int, node_id: str) -> None:
+        if not self._map_data or not self._map_data.graph.has_node(node_id):
+            return
+        self.state.selected_start_node = node_id
+        self._on_reset()
+        self.state.selected_node = node_id
+        self._show_toast(f"Start node: {node_id}")
+
+    def _on_goal_node_change(self, idx: int, node_id: str) -> None:
+        if not self._map_data or not self._map_data.graph.has_node(node_id):
+            return
+        self.state.selected_goal_node = node_id
+        self._on_reset()
+        self.state.selected_node = node_id
+        self._show_toast(f"Goal node: {node_id}")
+
+    def _current_start(self) -> str:
+        if not self._map_data:
+            return ""
+        selected = self.state.selected_start_node
+        if selected and self._map_data.graph.has_node(selected):
+            return selected
+        return self._map_data.hacker_start
+
+    def _current_goals(self) -> list[str]:
+        if not self._map_data:
+            return []
+        selected = self.state.selected_goal_node
+        if selected and self._map_data.graph.has_node(selected):
+            return [selected]
+        return list(self._map_data.goal_nodes)
 
     def _algorithm_step_runner(self, group: int, algo_idx: int) -> tuple[str, Callable]:
         if group == 0:
@@ -298,8 +334,8 @@ class App:
     def _run_compare_algorithms(self, group: int) -> list[AlgorithmResult]:
         assert self._map_data is not None
         graph = self._map_data.graph
-        start = self._map_data.hacker_start
-        goals = self._map_data.goal_nodes
+        start = self._current_start()
+        goals = self._current_goals()
         results: list[AlgorithmResult] = []
         seed = self._current_seed()
         for expected_name, run_func in self._algorithm_run_specs(group):
@@ -368,11 +404,13 @@ class App:
 
         run.algorithm_name = name
         seed = self._current_seed()
+        start = self._current_start()
+        goals = self._current_goals()
         if group == 2 and algo_idx == 2:
             self._step_gen = solve_steps(
                 self._map_data.graph,
-                self._map_data.hacker_start,
-                self._map_data.goal_nodes,
+                start,
+                goals,
                 seed=seed,
                 t0=self.state.sa_t0,
                 alpha=self.state.sa_alpha,
@@ -382,30 +420,30 @@ class App:
         elif group == 3 and algo_idx == 2:
             self._step_gen = solve_steps(
                 self._map_data.graph,
-                self._map_data.hacker_start,
-                self._map_data.goal_nodes,
+                start,
+                goals,
                 seed=seed,
                 max_steps=300,
             )
         elif group == 4:
             self._step_gen = solve_steps(
                 self._map_data.graph,
-                self._map_data.hacker_start,
-                self._map_data.goal_nodes,
+                start,
+                goals,
                 metadata=self._map_data.metadata,
             )
         elif group == 5:
             self._step_gen = solve_steps(
                 self._map_data.graph,
-                self._map_data.hacker_start,
-                self._map_data.goal_nodes,
+                start,
+                goals,
                 depth=self.state.game_depth,
             )
         else:
             self._step_gen = solve_steps(
                 self._map_data.graph,
-                self._map_data.hacker_start,
-                self._map_data.goal_nodes,
+                start,
+                goals,
             )
         run.log.clear()
         run.status = "ready"
@@ -527,8 +565,8 @@ class App:
         self._draw_top_nav()
 
         current_step = run.current_step
-        hacker_pos = self._map_data.hacker_start if self._map_data else ""
-        goals = self._map_data.goal_nodes if self._map_data else []
+        hacker_pos = self._current_start()
+        goals = self._current_goals()
         self.graph_view.draw(
             self.screen,
             current_step,
@@ -679,7 +717,9 @@ class App:
         if not self._map_data:
             return
         graph = self._map_data.graph
-        node_id = self.state.selected_node or self.state.hovered_node or self._map_data.hacker_start
+        start_node = self._current_start()
+        goal_nodes = self._current_goals()
+        node_id = self.state.selected_node or self.state.hovered_node or start_node
         node = graph.get_node(node_id)
         if not node:
             return
@@ -688,8 +728,10 @@ class App:
         legend_h = max(214, min(268, int(rect.height * 0.42)))
         legend_top = rect.bottom - legend_h
         info_bottom = legend_top - 10
-        node_color = COLOR_NODE_HACKER if node.id == self._map_data.hacker_start else get_node_color(node.kind)
-        if node.id in self._map_data.goal_nodes:
+        is_start = node.id == start_node
+        is_goal = node.id in goal_nodes
+        node_color = COLOR_NODE_HACKER if is_start else get_node_color(node.kind)
+        if is_goal:
             node_color = COLOR_NODE_SERVER
         draw_network_node(
             self.screen,
@@ -697,26 +739,43 @@ class App:
             (x + 28, y + 28),
             22,
             node_color,
-            hacker=node.id == self._map_data.hacker_start,
+            hacker=is_start,
             selected=True,
         )
         name = get_font(18, bold=True).render(node.id, True, COLOR_TEXT_PRIMARY)
         self.screen.blit(name, (x + 72, y + 18))
-        y += 66
+        y += 58
+        if is_start and is_goal:
+            role = "Start + Goal"
+            status_text = "Start trùng Goal"
+            status_color = COLOR_ACCENT
+        elif is_start:
+            role = "Start Node"
+            status_text = "Điểm bắt đầu"
+            status_color = COLOR_TEXT_ERROR
+        elif is_goal:
+            role = "Goal Node"
+            status_text = "Mục tiêu"
+            status_color = COLOR_NODE_SERVER
+        else:
+            role = "Node trung gian"
+            status_text = "An toàn"
+            status_color = COLOR_TEXT_PRIMARY
         rows = [
+            ("Vai trò", role),
             ("Loại", NODE_KIND_LABELS.get(node.kind, node.kind)),
             ("Mức bảo mật", f"{node.security_level} / 10"),
-            ("Trạng thái", "Bị hacker kiểm soát" if node.compromised else "An toàn"),
+            ("Trạng thái", status_text),
             ("Thuộc Zone", node.zone or "Không có"),
             ("IDS giám sát", "Có" if node.monitored else "Không"),
         ]
         for label, value in rows:
-            color = COLOR_TEXT_ERROR if label == "Trạng thái" and node.compromised else COLOR_TEXT_PRIMARY
-            if y + 20 > info_bottom:
+            color = status_color if label == "Trạng thái" else COLOR_TEXT_PRIMARY
+            if y + 19 > info_bottom:
                 break
-            draw_text_fit(self.screen, label + ":", pygame.Rect(x, y, 112, 20), COLOR_TEXT_SECONDARY, size=12)
-            draw_text_fit(self.screen, value, pygame.Rect(x + 118, y, rect.width - 146, 20), color, size=12)
-            y += 23
+            draw_text_fit(self.screen, label + ":", pygame.Rect(x, y, 112, 19), COLOR_TEXT_SECONDARY, size=12)
+            draw_text_fit(self.screen, value, pygame.Rect(x + 118, y, rect.width - 146, 19), color, size=12)
+            y += 20
 
         if y + 40 <= info_bottom:
             conn_title = get_font(12, bold=True).render("Kết nối:", True, COLOR_TEXT_SECONDARY)

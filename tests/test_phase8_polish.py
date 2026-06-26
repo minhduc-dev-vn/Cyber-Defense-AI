@@ -83,6 +83,23 @@ def test_pause_then_step_advances_without_corrupting_state(app: App) -> None:
     assert run.status in {"paused", "success", "failure"}
 
 
+def test_custom_start_and_goal_nodes_drive_algorithm_input(app: App) -> None:
+    assert app._map_data is not None
+
+    app._on_start_node_change(0, "PC2")
+    app._on_goal_node_change(0, "Firewall")
+    app._on_start()
+    _drive_until_terminal(app)
+
+    run = app.state.run_state
+    assert app._current_start() == "PC2"
+    assert app._current_goals() == ["Firewall"]
+    assert run.status == "success"
+    assert run.metrics is not None
+    assert run.metrics.path[0] == "PC2"
+    assert run.metrics.path[-1] == "Firewall"
+
+
 def test_seed_reproducibility_for_random_algorithm() -> None:
     data = load_map(ROOT / "maps" / "defense_optimization.json")
 
