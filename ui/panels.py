@@ -1,8 +1,5 @@
 """
-panels.py — Bảng điều khiển bên trái (Control Panel).
-
-Gồm: tab nhóm thuật toán, dropdown chọn algo/map,
-nút Start/Pause/Step/Reset, speed, seed, params.
+panels.py — Bảng điều khiển bên trái (Control Panel) và thanh Tab ngang.
 """
 from __future__ import annotations
 
@@ -10,7 +7,7 @@ from typing import Callable, List, Optional
 
 import pygame
 
-from core.constants import SPEED_OPTIONS, MAP_NAMES, CONTROL_PANEL_WIDTH
+from core.constants import SPEED_OPTIONS, MAP_NAMES
 from core.state import AppState
 from ui.theme import (
     get_font,
@@ -18,19 +15,18 @@ from ui.theme import (
     COLOR_PANEL_BORDER,
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
-    COLOR_BTN_ACTIVE,
+    COLOR_BG,
 )
 from ui.controls import Button, Dropdown, TextInput, TabBar
 
 
-# Danh sách nhóm và thuật toán
 GROUPS = [
-    "1. Tìm kiếm mù",
-    "2. Heuristic",
-    "3. Local Search",
-    "4. CSP",
-    "5. Env phức tạp",
-    "6. Đối kháng",
+    "Tìm kiếm mù",
+    "Tìm kiếm có phí",
+    "Tìm kiếm cục bộ",
+    "Môi trường phức tạp",
+    "CSP - Ràng buộc",
+    "Môi trường đối kháng",
 ]
 
 GROUP_ALGOS = [
@@ -56,10 +52,7 @@ SPEED_KEYS = list(SPEED_OPTIONS.keys())
 
 class ControlPanel:
     """
-    Bảng điều khiển bên trái.
-
-    Callbacks:
-      on_start, on_pause, on_step, on_reset, on_compare
+    Bảng điều khiển bên trái (chia thành các card) + Thanh tab ngang trên cùng.
     """
 
     def __init__(
@@ -75,6 +68,7 @@ class ControlPanel:
         on_map_change: Optional[Callable] = None,
     ) -> None:
         self.rect = rect
+        self.tab_rect = pygame.Rect(0, 0, 0, 0)  # Sẽ được set qua _build_widgets
         self.app_state = app_state
 
         self._on_start = on_start
@@ -85,130 +79,108 @@ class ControlPanel:
         self._on_algo_change = on_algo_change
         self._on_map_change = on_map_change
 
-        self._build_widgets()
-
     def _build_widgets(self) -> None:
-        x = self.rect.x + 8
-        w = self.rect.width - 16
-        y = self.rect.y + 8
+        """Được gọi từ app.py sau khi Layout tính toán xong rect."""
+        from ui.app import App # hacky way to get layout but let's assume it's passed or we'll get it from rect
+        
+        # We need the tab_rect, but wait, app.py calls `self.control_panel.rect = layout.control_panel`. 
+        # I should add a method to pass tab_rect.
+        pass
 
-        # Tab nhóm
+    def set_rects(self, control_rect: pygame.Rect, tab_rect: pygame.Rect) -> None:
+        self.rect = control_rect
+        self.tab_rect = tab_rect
+        
+        # 1. Tab Bar
         self.tab_bar = TabBar(
-            pygame.Rect(x, y, w, 28),
-            ["G1", "G2", "G3", "G4", "G5", "G6"],
+            self.tab_rect,
+            GROUPS,
             selected=self.app_state.selected_group_index,
             on_change=self._on_group_change,
         )
-        y += 34
 
-        # Nhãn nhóm
-        self._group_label_y = y
-        y += 18
+        # 2. Các control trong Left Panel
+        pad = int(self.rect.width * 0.06)
+        x = self.rect.x + pad
+        w = self.rect.width - 2 * pad
+        y = self.rect.y + pad
 
-        # Dropdown thuật toán
-        self._algo_label_y = y
-        y += 16
+        self.cards: list[tuple[pygame.Rect, str]] = []
+
+        # Card 1: CHỌN THUẬT TOÁN
+        self.cards.append((pygame.Rect(x, y, w, 70), "1. CHỌN THUẬT TOÁN"))
         group = self.app_state.selected_group_index
         self.algo_dropdown = Dropdown(
-            pygame.Rect(x, y, w, 24),
+            pygame.Rect(x + 10, y + 30, w - 20, 26),
             GROUP_ALGOS[group],
             selected_index=self.app_state.selected_algo_index,
             on_change=self._on_algo_change_internal,
         )
-        y += 30
+        y += 85
 
-        # Dropdown map
-        self._map_label_y = y
-        y += 16
+        # Card 2: CHỌN BẢN ĐỒ
+        self.cards.append((pygame.Rect(x, y, w, 70), "2. CHỌN BẢN ĐỒ"))
         maps = GROUP_MAPS[group]
         self.map_dropdown = Dropdown(
-            pygame.Rect(x, y, w, 24),
+            pygame.Rect(x + 10, y + 30, w - 20, 26),
             maps,
             selected_index=0,
             on_change=self._on_map_change_internal,
         )
-        y += 36
+        y += 85
 
-        # Nút Start/Pause
-        half = (w - 4) // 2
-        self.btn_start = Button(
-            pygame.Rect(x, y, half, 30),
-            "▶ Start",
-            self._on_start,
-            color=(40, 160, 80),
+        # Card 3: THIẾT LẬP
+        self.cards.append((pygame.Rect(x, y, w, 130), "3. THIẾT LẬP"))
+        cy = y + 30
+        
+        self.btn_details = Button(
+            pygame.Rect(x + 10, cy, w - 20, 26),
+            "Hiển thị chi tiết / Compare",
+            self._toggle_details,
+            color=(50, 70, 100),
         )
-        self.btn_pause = Button(
-            pygame.Rect(x + half + 4, y, half, 30),
-            "⏸ Pause",
-            self._on_pause,
-            color=(160, 120, 30),
-        )
-        y += 36
-
-        # Nút Step/Reset
-        self.btn_step = Button(
-            pygame.Rect(x, y, half, 30),
-            "→ Step",
-            self._on_step,
-            color=(40, 80, 160),
-        )
-        self.btn_reset = Button(
-            pygame.Rect(x + half + 4, y, half, 30),
-            "↺ Reset",
-            self._on_reset,
-            color=(140, 40, 40),
-        )
-        y += 40
-
-        # Speed
-        self._speed_label_y = y
-        y += 16
+        cy += 34
+        
         self.speed_dropdown = Dropdown(
-            pygame.Rect(x, y, w, 24),
+            pygame.Rect(x + 10, cy, w - 20, 26),
             SPEED_KEYS,
             selected_index=SPEED_KEYS.index(self.app_state.speed_key),
             on_change=self._on_speed_change,
         )
-        y += 32
-
-        # Seed
-        self._seed_label_y = y
-        y += 16
+        cy += 34
+        
         self.seed_input = TextInput(
-            pygame.Rect(x, y, w, 24),
+            pygame.Rect(x + 10, cy, w - 20, 26),
             "Seed",
             str(self.app_state.random_seed),
             max_len=8,
         )
-        y += 34
+        y += 145
 
-        # Compare
+        # Card 4: ĐIỀU KHIỂN
+        self.cards.append((pygame.Rect(x, y, w, 120), "4. ĐIỀU KHIỂN"))
+        cy = y + 30
+        bw = (w - 28) // 4
+        self.btn_start = Button(pygame.Rect(x + 10, cy, bw, 32), "Start", self._on_start, color=(40, 160, 80))
+        self.btn_pause = Button(pygame.Rect(x + 10 + bw + 2, cy, bw, 32), "Pause", self._on_pause, color=(160, 120, 30))
+        self.btn_step = Button(pygame.Rect(x + 10 + 2*bw + 4, cy, bw, 32), "Step", self._on_step, color=(40, 80, 160))
+        self.btn_reset = Button(pygame.Rect(x + 10 + 3*bw + 6, cy, bw, 32), "Reset", self._on_reset, color=(160, 50, 50))
+        cy += 44
+        
         if self._on_compare:
             self.btn_compare = Button(
-                pygame.Rect(x, y, w, 28),
-                "📊 So sánh nhóm",
+                pygame.Rect(x + 10, cy, w - 20, 30),
+                "So sánh nhóm",
                 self._on_compare,
                 color=(60, 60, 120),
             )
-            y += 36
         else:
             self.btn_compare = None
 
-        # Hiển thị chi tiết
-        self.btn_details = Button(
-            pygame.Rect(x, y, w, 28),
-            "🔍 Chi tiết",
-            self._toggle_details,
-            color=(50, 70, 100),
-        )
-        y += 36
-
-        self._extra_y = y  # Vị trí bắt đầu vẽ params bổ sung
 
     def _on_group_change(self, idx: int) -> None:
         self.app_state.selected_group_index = idx
         self.app_state.selected_algo_index = 0
-        # Rebuild algo/map dropdowns
         group = idx
         self.algo_dropdown.options = GROUP_ALGOS[group]
         self.algo_dropdown.selected_index = 0
@@ -236,8 +208,20 @@ class ControlPanel:
         self.app_state.show_details = not self.app_state.show_details
 
     def handle_event(self, event: pygame.event.Event) -> bool:
+        if not hasattr(self, 'tab_bar'):
+            return False
+            
         consumed = False
         consumed |= self.tab_bar.handle_event(event)
+        
+        # Check active drops first because they hover over everything
+        if self.algo_dropdown._open:
+            if self.algo_dropdown.handle_event(event): return True
+        if self.map_dropdown._open:
+            if self.map_dropdown.handle_event(event): return True
+        if self.speed_dropdown._open:
+            if self.speed_dropdown.handle_event(event): return True
+            
         consumed |= self.algo_dropdown.handle_event(event)
         consumed |= self.map_dropdown.handle_event(event)
         consumed |= self.btn_start.handle_event(event)
@@ -252,75 +236,39 @@ class ControlPanel:
         return consumed
 
     def draw(self, surface: pygame.Surface) -> None:
-        # Nền panel
+        if not hasattr(self, 'tab_bar'):
+            return
+            
+        # Nền panel trái
         pygame.draw.rect(surface, COLOR_PANEL_BG, self.rect)
         pygame.draw.rect(surface, COLOR_PANEL_BORDER, self.rect, 1)
 
-        # Tiêu đề
-        font_title = get_font(14, bold=True)
-        title = font_title.render("🛡️ Cyber Defense AI", True, (180, 210, 255))
-        surface.blit(title, (self.rect.x + 8, self.rect.y + 4 + 8 + 34 - 30))
-
-        font_lbl = get_font(11)
-
-        # Tab bar
+        # Thanh tab ngang (đặt ở trên cùng)
         self.tab_bar.draw(surface)
 
-        # Label nhóm
-        group = self.app_state.selected_group_index
-        group_name = GROUPS[group]
-        grp_surf = font_lbl.render(group_name, True, (160, 190, 240))
-        surface.blit(grp_surf, (self.rect.x + 8, self._group_label_y))
+        font_lbl = get_font(12, bold=True)
+        
+        # Vẽ các thẻ (cards)
+        for cr, title in self.cards:
+            pygame.draw.rect(surface, (20, 26, 40), cr, border_radius=6)
+            pygame.draw.rect(surface, COLOR_PANEL_BORDER, cr, 1, border_radius=6)
+            ts = font_lbl.render(title, True, (160, 190, 240))
+            surface.blit(ts, (cr.x + 10, cr.y + 8))
 
-        # Label + dropdown thuật toán
-        surface.blit(font_lbl.render("Thuật toán:", True, COLOR_TEXT_SECONDARY), (self.rect.x + 8, self._algo_label_y))
-        self.algo_dropdown.draw(surface)
-
-        # Label + dropdown map
-        surface.blit(font_lbl.render("Bản đồ:", True, COLOR_TEXT_SECONDARY), (self.rect.x + 8, self._map_label_y))
-        self.map_dropdown.draw(surface)
-
-        # Nút điều khiển
+        # Các components trong thẻ
+        self.btn_details.draw(surface)
+        self.seed_input.draw(surface)
+        
         self.btn_start.draw(surface)
         self.btn_pause.draw(surface)
         self.btn_step.draw(surface)
         self.btn_reset.draw(surface)
 
-        # Speed
-        surface.blit(font_lbl.render("Tốc độ:", True, COLOR_TEXT_SECONDARY), (self.rect.x + 8, self._speed_label_y))
-        self.speed_dropdown.draw(surface)
-
-        # Seed
-        surface.blit(font_lbl.render("Random Seed:", True, COLOR_TEXT_SECONDARY), (self.rect.x + 8, self._seed_label_y))
-        self.seed_input.draw(surface)
-
-        # Compare / Details
         if self.btn_compare:
             self.btn_compare.draw(surface)
-        self.btn_details.draw(surface)
 
-        # Legend màu sắc
-        self._draw_legend(surface)
+        # Dropdown vẽ sau cùng để popup nằm trên
+        self.speed_dropdown.draw(surface)
+        self.map_dropdown.draw(surface)
+        self.algo_dropdown.draw(surface)
 
-    def _draw_legend(self, surface: pygame.Surface) -> None:
-        """Vẽ legend màu sắc nhỏ ở cuối panel."""
-        font = get_font(10)
-        from core.constants import (
-            COLOR_FRONTIER, COLOR_EXPLORED, COLOR_CURRENT,
-            COLOR_FINAL_PATH, COLOR_NODE_HACKER, COLOR_NODE_SERVER,
-        )
-        items = [
-            (COLOR_NODE_HACKER, "Hacker"),
-            (COLOR_NODE_SERVER, "Server/DB"),
-            (COLOR_FRONTIER, "Frontier"),
-            (COLOR_EXPLORED, "Explored"),
-            (COLOR_CURRENT, "Hiện tại"),
-            (COLOR_FINAL_PATH, "Đường đi"),
-        ]
-        x = self.rect.x + 6
-        y = self.rect.bottom - len(items) * 16 - 6
-        for color, label in items:
-            pygame.draw.circle(surface, color, (x + 6, y + 7), 5)
-            lbl_surf = font.render(label, True, COLOR_TEXT_SECONDARY)
-            surface.blit(lbl_surf, (x + 14, y + 1))
-            y += 15

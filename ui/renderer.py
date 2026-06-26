@@ -2,7 +2,7 @@
 renderer.py — Vẽ đồ thị mạng lên Pygame surface.
 
 Không chứa logic thuật toán. Nhận StepEvent và trạng thái,
-vẽ node/edge với màu đúng quy ước.
+vẽ node/edge với màu đúng quy ước. Hỗ trợ auto scale và centering.
 """
 from __future__ import annotations
 
@@ -39,15 +39,12 @@ from ui.theme import (
 class GraphRenderer:
     """
     Vẽ đồ thị mạng lên surface.
-
-    Cách dùng:
-        renderer = GraphRenderer(surface, graph)
-        renderer.draw(step_event, hacker_pos, goal_nodes)
     """
 
     def __init__(self, surface: pygame.Surface, graph: NetworkGraph) -> None:
         self.surface = surface
         self.graph = graph
+        self._last_transform = (0.0, 0.0, 1.0) # ox, oy, scale
 
     def draw(
         self,
@@ -56,12 +53,10 @@ class GraphRenderer:
         goal_nodes: list[str],
         selected_node: Optional[str] = None,
         hovered_node: Optional[str] = None,
-        offset: tuple[int, int] = (0, 0),
+        rect: Optional[pygame.Rect] = None,
     ) -> None:
         """
-        Vẽ toàn bộ đồ thị dựa trên bước thuật toán hiện tại.
-
-        step=None: vẽ trạng thái ban đầu (không có animation).
+        Vẽ toàn bộ đồ thị. Tự động scale và canh giữa dựa vào rect.
         """
         frontier: Set[str] = set(step.frontier) if step else set()
         explored: Set[str] = set(step.explored) if step else set()
@@ -69,13 +64,42 @@ class GraphRenderer:
         current: Optional[str] = step.current_node if step else None
         final_edges: Set[tuple[str, str]] = set()
 
-        # Tập edge thuộc final path
         if final_path:
             for i in range(len(final_path) - 1):
                 final_edges.add((final_path[i], final_path[i + 1]))
                 final_edges.add((final_path[i + 1], final_path[i]))
 
-        ox, oy = offset
+        # Calculate bounding box and scale
+        ox, oy, scale = 0.0, 0.0, 1.0
+        if rect:
+            nodes = self.graph.get_all_nodes()
+            if nodes:
+                min_x = min(n.position[0] for n in nodes)
+                max_x = max(n.position[0] for n in nodes)
+                min_y = min(n.position[1] for n in nodes)
+                max_y = max(n.position[1] for n in nodes)
+                
+                gw = max_x - min_x
+                gh = max_y - min_y
+                if gw == 0: gw = 1
+                if gh == 0: gh = 1
+                
+                pad_x, pad_y = 50, 50
+                scale_x = (rect.width - 2 * pad_x) / gw
+                scale_y = (rect.height - 2 * pad_y) / gh
+                scale = min(scale_x, scale_y)
+                # Giới hạn scale không quá to
+                scale = min(scale, 2.5)
+                
+                scaled_gw = gw * scale
+                scaled_gh = gh * scale
+                
+                ox = rect.x + (rect.width - scaled_gw) / 2 - min_x * scale
+                oy = rect.y + (rect.height - scaled_gh) / 2 - min_y * scale
+        
+        self._last_transform = (ox, oy, scale)
+        r = max(10, int(NODE_RADIUS * min(scale, 1.2)))
+        e_w = max(2, int(EDGE_WIDTH * min(scale, 1.2)))
 
         # ── Vẽ edges trước (dưới nodes) ─────────────────────────────────────
         for edge in self.graph.get_all_edges():
@@ -84,24 +108,24 @@ class GraphRenderer:
             if not n_src or not n_dst:
                 continue
 
-            sx, sy = n_src.position[0] + ox, n_src.position[1] + oy
-            dx, dy = n_dst.position[0] + ox, n_dst.position[1] + oy
+            sx, sy = n_src.position[0] * scale + ox, n_src.position[1] * scale + oy
+            dx, dy = n_dst.position[0] * scale + ox, n_dst.position[1] * scale + oy
 
             # Màu cạnh
             if edge.blocked:
                 color = COLOR_EDGE_BLOCKED
-                width = EDGE_WIDTH
+                width = e_w
             elif (edge.source, edge.target) in final_edges or (edge.target, edge.source) in final_edges:
                 color = COLOR_EDGE_FINAL
-                width = EDGE_WIDTH + 2
+                width = e_w + 2
             else:
                 color = COLOR_EDGE_DEFAULT
-                width = EDGE_WIDTH
+                width = e_w
 
             pygame.draw.line(self.surface, color, (sx, sy), (dx, dy), width)
 
             # Label chi phí cạnh
-            mid_x, mid_y = (sx + dx) // 2, (sy + dy) // 2
+            mid_x, mid_y = (sx + dx) / 2, (sy + dy) / 2
             cost_label = f"{edge.base_cost:.0f}"
             font_small = get_font(10)
             cost_surf = font_small.render(cost_label, True, COLOR_TEXT_SECONDARY)
@@ -109,8 +133,7 @@ class GraphRenderer:
 
         # ── Vẽ nodes ────────────────────────────────────────────────────────
         for node in self.graph.get_all_nodes():
-            nx, ny = node.position[0] + ox, node.position[1] + oy
-            r = NODE_RADIUS
+            nx, ny = node.position[0] * scale + ox, node.position[1] * scale + oy
 
             # Xác định trạng thái của node
             if node.blocked:
@@ -134,7 +157,6 @@ class GraphRenderer:
             else:
                 base_color = get_node_color(node.kind, state)
 
-            # Nếu là goal và đang là final path, giữ màu tím
             if node.id in goal_nodes:
                 base_color = get_node_color(node.kind, "default")
 
@@ -166,16 +188,17 @@ class GraphRenderer:
             font = get_font(11, bold=(node.kind in ("server", "database")))
             label = font.render(node.id, True, COLOR_TEXT_PRIMARY)
             lw, lh = label.get_size()
-            self.surface.blit(label, (nx - lw // 2, ny + r + 3))
+            self.surface.blit(label, (nx - lw / 2, ny + r + 3))
 
             # Node bị chặn: vẽ dấu X
             if node.blocked:
-                pygame.draw.line(self.surface, (200, 50, 50), (nx - 10, ny - 10), (nx + 10, ny + 10), 2)
-                pygame.draw.line(self.surface, (200, 50, 50), (nx + 10, ny - 10), (nx - 10, ny + 10), 2)
+                pygame.draw.line(self.surface, (200, 50, 50), (nx - r + 4, ny - r + 4), (nx + r - 4, ny + r - 4), 2)
+                pygame.draw.line(self.surface, (200, 50, 50), (nx + r - 4, ny - r + 4), (nx - r + 4, ny + r - 4), 2)
 
-    def _draw_node_icon(self, kind: str, cx: int, cy: int, r: int) -> None:
+    def _draw_node_icon(self, kind: str, cx: float, cy: float, r: int) -> None:
         """Vẽ icon nhỏ bên trong node theo loại."""
-        font_icon = get_font(12, bold=True)
+        f_size = max(8, int(r * 0.5))
+        font_icon = get_font(f_size, bold=True)
         icons = {
             "pc": "PC",
             "router": "RT",
@@ -188,14 +211,17 @@ class GraphRenderer:
         text = icons.get(kind, "?")
         surf = font_icon.render(text, True, (230, 240, 255))
         tw, th = surf.get_size()
-        self.surface.blit(surf, (cx - tw // 2, cy - th // 2))
+        self.surface.blit(surf, (cx - tw / 2, cy - th / 2))
 
-    def get_node_at(self, x: int, y: int, offset: tuple[int, int] = (0, 0)) -> Optional[str]:
+    def get_node_at(self, x: int, y: int, rect: Optional[pygame.Rect] = None) -> Optional[str]:
         """Trả về id node dưới điểm (x, y), hoặc None."""
-        ox, oy = offset
+        ox, oy, scale = self._last_transform
+        # Tính node_radius đã scale
+        r = max(10, int(NODE_RADIUS * min(scale, 1.2)))
         for node in self.graph.get_all_nodes():
-            nx, ny = node.position[0] + ox, node.position[1] + oy
+            nx, ny = node.position[0] * scale + ox, node.position[1] * scale + oy
             dist = math.hypot(x - nx, y - ny)
-            if dist <= NODE_RADIUS + 4:
+            if dist <= r + 4:
                 return node.id
         return None
+

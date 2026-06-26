@@ -35,24 +35,23 @@ class GraphView:
         surf = pygame.display.get_surface()
         self._renderer = GraphRenderer(surf, graph)
 
-    def _graph_offset(self) -> tuple[int, int]:
-        return (self.rect.x, self.rect.y)
+    def _graph_rect(self) -> pygame.Rect:
+        return self.rect
 
     def handle_event(self, event: pygame.event.Event) -> None:
-        offset = self._graph_offset()
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos) and self._renderer:
                 self.app_state.selected_node = self._renderer.get_node_at(
                     event.pos[0],
                     event.pos[1],
-                    offset=offset,
+                    rect=self._graph_rect(),
                 )
         elif event.type == pygame.MOUSEMOTION:
             if self.rect.collidepoint(event.pos) and self._renderer:
                 self.app_state.hovered_node = self._renderer.get_node_at(
                     event.pos[0],
                     event.pos[1],
-                    offset=offset,
+                    rect=self._graph_rect(),
                 )
             elif not self.rect.collidepoint(event.pos):
                 self.app_state.hovered_node = None
@@ -79,7 +78,7 @@ class GraphView:
                 goal_nodes,
                 selected_node=self.app_state.selected_node,
                 hovered_node=self.app_state.hovered_node,
-                offset=self._graph_offset(),
+                rect=self._graph_rect(),
             )
 
         if self.app_state.selected_node and graph:
@@ -101,9 +100,10 @@ class GraphView:
             f"Detect risk: {node.detection_risk:.2f}",
         ]
         width, height = 190, len(info_lines) * 14 + 16
-        ox, oy = self._graph_offset()
-        px = min(node.position[0] + ox + 30, self.rect.right - width - 4)
-        py = min(node.position[1] + oy - 10, self.rect.bottom - height - 4)
+        
+        ox, oy, scale = self._renderer._last_transform if self._renderer else (self.rect.x, self.rect.y, 1.0)
+        px = min(node.position[0] * scale + ox + 30, self.rect.right - width - 4)
+        py = min(node.position[1] * scale + oy - 10, self.rect.bottom - height - 4)
         px = max(px, self.rect.x + 4)
         py = max(py, self.rect.y + 4)
 

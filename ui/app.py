@@ -7,10 +7,18 @@ objects, while this module handles playback, logging, stats, and controls.
 from __future__ import annotations
 
 import time
+import sys
+import ctypes
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 import pygame
+
+if sys.platform == "win32":
+    try:
+        import pygame._sdl2.video as sdl2_video
+    except ImportError:
+        sdl2_video = None
 
 from core.constants import FPS, SPEED_OPTIONS, WINDOW_HEIGHT, WINDOW_WIDTH
 from core.map_loader import MapData, MapLoadError, load_map
@@ -21,7 +29,7 @@ from ui.graph_view import GraphView
 from ui.layout import Layout
 from ui.log_view import LogView
 from ui.panels import ControlPanel
-from ui.stats_view import StatsView
+from ui.stats_view import RightPanelView, BottomPanelView
 from ui.theme import COLOR_BG, get_font
 
 
@@ -33,15 +41,27 @@ class App:
     def __init__(self) -> None:
         pygame.init()
         pygame.display.set_caption(self.TITLE)
+        
+        info = pygame.display.Info()
+        screen_w = info.current_w
+        screen_h = info.current_h
+        
+        window_w = min(1600, screen_w)
+        window_h = min(950, screen_h - 40)
+        
         self.screen = pygame.display.set_mode(
-            (WINDOW_WIDTH, WINDOW_HEIGHT),
+            (window_w, window_h),
             pygame.RESIZABLE,
         )
+        
+        from ui.theme import set_ui_scale
+        set_ui_scale(window_w / 1366.0)
+        
         self.clock = pygame.time.Clock()
 
         self.state = AppState()
         self.state.run_state = AlgorithmRunState()
-        self.layout = Layout(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.layout = Layout(window_w, window_h)
 
         self._map_data: Optional[MapData] = None
         self._load_map("pathfinding_basic")
@@ -51,7 +71,8 @@ class App:
             self.graph_view.set_graph(self._map_data.graph)
 
         self.log_view = LogView(self.layout.log_panel)
-        self.stats_view = StatsView(self.layout.stats_overlay)
+        self.right_panel = RightPanelView(self.layout.right_panel, self.state)
+        self.bottom_panel = BottomPanelView(self.layout.frontier_panel, self.layout.result_panel)
 
         self.control_panel = ControlPanel(
             self.layout.control_panel,
@@ -64,6 +85,7 @@ class App:
             on_algo_change=self._on_algo_change,
             on_map_change=self._on_map_change,
         )
+        self.control_panel.set_rects(self.layout.control_panel, self.layout.tab_rect)
 
         self._step_gen: Optional[Iterator[StepEvent]] = None
         self._last_auto_step: float = 0.0
@@ -298,8 +320,14 @@ class App:
                 elif event.type == pygame.VIDEORESIZE:
                     self.layout.update(*event.size)
                     self._rebuild_views()
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self.layout.header_rect.collidepoint(event.pos):
+                        if sys.platform == "win32":
+                            hwnd = pygame.display.get_wm_info()["window"]
+                            ctypes.windll.user32.ReleaseCapture()
+                            ctypes.windll.user32.SendMessageW(hwnd, 0xA1, 2, 0)
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
+                    if event.key == pygame.K_ESCAPE or (event.key == pygame.K_q and (pygame.key.get_mods() & pygame.KMOD_CTRL)):
                         running = False
                     elif event.key == pygame.K_SPACE:
                         if self.state.run_state.status == "running":
@@ -337,17 +365,18 @@ class App:
                 graph=self._map_data.graph if self._map_data else None,
             )
 
-            self.stats_view.draw(
+            self.right_panel.draw(self.screen)
+            self.bottom_panel.draw(
                 self.screen,
                 step=current_step,
                 metrics=run.metrics,
                 status=run.status,
-                show_details=self.state.show_details,
                 compare_results=self.state.compare_results if self.state.compare_mode else None,
             )
 
             self.control_panel.draw(self.screen)
             self.log_view.draw(self.screen)
+            self._draw_header()
             self._draw_toast()
             if self._map_data:
                 self._draw_map_title()
@@ -359,9 +388,10 @@ class App:
     def _rebuild_views(self) -> None:
         self.graph_view.rect = self.layout.graph_area
         self.log_view.rect = self.layout.log_panel
-        self.stats_view.rect = self.layout.stats_overlay
-        self.control_panel.rect = self.layout.control_panel
-        self.control_panel._build_widgets()
+        self.right_panel.rect = self.layout.right_panel
+        self.bottom_panel.f_rect = self.layout.frontier_panel
+        self.bottom_panel.r_rect = self.layout.result_panel
+        self.control_panel.set_rects(self.layout.control_panel, self.layout.tab_rect)
 
     def _draw_toast(self) -> None:
         if not self._toast or time.time() > self._toast_until:
@@ -379,6 +409,25 @@ class App:
 
     def _draw_map_title(self) -> None:
         assert self._map_data is not None
-        font = get_font(11)
-        surf = font.render(self._map_data.name, True, (100, 130, 180))
-        self.screen.blit(surf, (self.layout.graph_area.x + 8, self.layout.graph_area.y + 6))
+        font = get_font(12, bold=True)
+        surf = font.render("BẢN ĐỒ MẠNG", True, (140, 160, 200))
+        self.screen.blit(surf, (self.layout.graph_area.x + 12, self.layout.graph_area.y + 12))
+
+    def _draw_header(self) -> None:
+        rect = self.layout.header_rect
+        pygame.draw.rect(self.screen, COLOR_BG, rect)
+        
+        # Shield icon (simple circle with some lines, or just a character)
+        font_icon = get_font(18, bold=True)
+        icon_surf = font_icon.render("🛡️", True, (240, 240, 255))
+        
+        font_title = get_font(18, bold=True)
+        title_surf = font_title.render("Cyber Defense AI - AI Algorithms Simulator", True, (240, 240, 255))
+        
+        icon_x = 16
+        icon_y = rect.centery - icon_surf.get_height() // 2
+        title_x = icon_x + icon_surf.get_width() + 8
+        title_y = rect.centery - title_surf.get_height() // 2
+        
+        self.screen.blit(icon_surf, (icon_x, icon_y))
+        self.screen.blit(title_surf, (title_x, title_y))

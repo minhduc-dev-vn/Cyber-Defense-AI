@@ -73,21 +73,26 @@ __all__ = [
 
 # Cache fonts để không tải lại nhiều lần
 _font_cache: dict[tuple[str, int], pygame.font.Font] = {}
+_UI_SCALE: float = 1.0
 
+def set_ui_scale(scale: float) -> None:
+    global _UI_SCALE
+    _UI_SCALE = scale
 
 def get_font(size: int = 14, bold: bool = False) -> pygame.font.Font:
     """
-    Trả về pygame.font.Font với kích thước cho trước.
-
+    Trả về pygame.font.Font với kích thước cho trước, có nhân với UI_SCALE.
+    
     Ưu tiên dùng font hệ thống 'Segoe UI' (Windows) hoặc fallback sang SysFont.
     """
-    key = (("bold" if bold else "normal"), size)
+    scaled_size = max(10, int(size * _UI_SCALE))
+    key = (("bold" if bold else "normal"), scaled_size)
     if key not in _font_cache:
         try:
             name = "segoeuib" if bold else "segoeui"
-            font = pygame.font.SysFont(name, size)
+            font = pygame.font.SysFont(name, scaled_size)
         except Exception:
-            font = pygame.font.SysFont("arial", size, bold=bold)
+            font = pygame.font.SysFont("arial", scaled_size, bold=bold)
         _font_cache[key] = font
     return _font_cache[key]
 
