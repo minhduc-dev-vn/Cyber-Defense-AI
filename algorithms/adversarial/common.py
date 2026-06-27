@@ -1,8 +1,9 @@
-"""Shared game-tree helpers for adversarial search algorithms."""
+"""Shared helpers for the adversarial simulator."""
 from __future__ import annotations
 
 from collections import deque
 from math import inf
+from typing import Iterable
 
 from core.constants import (
     EVAL_HACKER_DATABASE,
@@ -16,6 +17,10 @@ from core.constants import (
 )
 from core.graph import NetworkGraph
 from core.models import Action, GameState
+
+
+ADVERSARIAL_HACKER_ACTIONS = ("move", "scan", "attack")
+ADVERSARIAL_DEFENDER_ACTIONS = ("block_node", "block_edge", "upgrade", "deploy_ids")
 
 
 def initial_state(graph: NetworkGraph, start: str, max_turns: int = 10) -> GameState:
@@ -71,16 +76,14 @@ def has_goal_path(graph: NetworkGraph, state: GameState, goals: list[str]) -> bo
 
 
 def is_terminal(graph: NetworkGraph, state: GameState, goals: list[str]) -> bool:
-    node = graph.get_node(state.hacker_position)
-    if node and node.kind in ("server", "database"):
+    if state.hacker_position in goals:
         return True
     if not has_goal_path(graph, state, goals):
         return True
     return state.remaining_turns <= 0
 
 
-def evaluate(graph: NetworkGraph, state: GameState, goals: list[str]) -> float:
-    """Evaluate from Hacker/MAX perspective."""
+def hacker_value(graph: NetworkGraph, state: GameState, goals: list[str]) -> float:
     node = graph.get_node(state.hacker_position)
     if node and node.kind == "database":
         return float(EVAL_HACKER_DATABASE)
@@ -95,6 +98,16 @@ def evaluate(graph: NetworkGraph, state: GameState, goals: list[str]) -> float:
         security_bonus = EVAL_HACKER_LOW_SECURITY * max(0, 6 - node.security_level)
     detected_penalty = EVAL_HACKER_DETECTED if state.detected else 0
     return EVAL_HACKER_NEAR_SERVER / max(dist, 1) + security_bonus + detected_penalty
+
+
+def defender_value(graph: NetworkGraph, state: GameState, goals: list[str]) -> float:
+    value = -hacker_value(graph, state, goals)
+    node = graph.get_node(state.hacker_position)
+    if node and node.kind in ("server", "database"):
+        value -= 100.0
+    if not has_goal_path(graph, state, goals):
+        value += 150.0
+    return value
 
 
 def _rank_nodes_near_hacker(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[str]:
@@ -118,23 +131,29 @@ def _rank_nodes_near_hacker(graph: NetworkGraph, state: GameState, goals: list[s
             remaining_turns=state.remaining_turns,
             history=state.history,
         )
+        if not has_goal_path(graph, probe, goals):
+            return (-1, node_id)
         return (shortest_distance(graph, probe, state.hacker_position, goals), node_id)
 
-    return [node_id for _, node_id in sorted((rank(node_id) for node_id in candidates), reverse=True)]
+    ranked = sorted((rank(node_id) for node_id in candidates), reverse=True)
+    return [node_id for score, node_id in ranked if score >= 0]
 
 
-def legal_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[Action]:
-    if state.turn == "hacker":
-        moves = active_neighbors(graph, state, state.hacker_position)
-        moves.sort(key=lambda node_id: (shortest_distance(graph, state, node_id, goals), node_id))
-        return [
-            Action("hacker", "move", node_id, f"Move to {node_id}")
-            for node_id in moves[:3]
-        ]
+def hacker_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[Action]:
+    actions: list[Action] = []
+    for neighbor in active_neighbors(graph, state, state.hacker_position):
+        actions.append(Action("hacker", "move", neighbor, f"Move to {neighbor}"))
+    if state.hacker_position not in goals:
+        actions.append(Action("hacker", "scan", state.hacker_position, f"Scan {state.hacker_position}"))
+    for goal in goals[:1]:
+        actions.append(Action("hacker", "attack", goal, f"Attack {goal}"))
+    return actions[:4]
 
+
+def defender_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[Action]:
     actions: list[Action] = []
     for node_id in _rank_nodes_near_hacker(graph, state, goals)[:3]:
-        actions.append(Action("defender", "block_node", node_id, f"Block node {node_id}"))
+        actions.append(Action("defender", "block_node", node_id, f"Block {node_id}"))
 
     edge_candidates: list[tuple[float, str, str]] = []
     for edge in graph.get_all_edges():
@@ -154,16 +173,18 @@ def legal_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> li
             remaining_turns=state.remaining_turns,
             history=state.history,
         )
+        if not has_goal_path(graph, probe, goals):
+            continue
         edge_candidates.append((shortest_distance(graph, probe, state.hacker_position, goals), edge.source, edge.target))
-    for _, left, right in sorted(edge_candidates, reverse=True)[:2]:
-        target = f"{left}|{right}"
-        actions.append(Action("defender", "block_edge", target, f"Block edge {left}-{right}"))
+    for _, left, right in sorted(edge_candidates, reverse=True)[:1]:
+        actions.append(Action("defender", "block_edge", f"{left}|{right}", f"Block edge {left}-{right}"))
 
-    for node_id in _rank_nodes_near_hacker(graph, state, goals):
-        if node_id not in state.upgraded_nodes:
+    if state.ids_positions:
+        actions.append(Action("defender", "deploy_ids", state.ids_positions[0], f"Activate IDS at {state.ids_positions[0]}"))
+    else:
+        for node_id in _rank_nodes_near_hacker(graph, state, goals):
             actions.append(Action("defender", "upgrade", node_id, f"Upgrade {node_id}"))
             break
-
     return actions[:4]
 
 
@@ -176,25 +197,36 @@ def apply_action(
     blocked_nodes = set(state.blocked_nodes)
     blocked_edges = set(state.blocked_edges)
     upgraded_nodes = set(state.upgraded_nodes)
+    firewall_positions = set(state.firewall_positions)
+    ids_positions = set(state.ids_positions)
     hacker_position = state.hacker_position
     detected = state.detected
 
-    if action.action_type == "move":
-        hacker_position = action.target
-        if action.target in state.ids_positions:
-            detected = True
-        for ids_node in state.ids_positions:
-            if graph.has_edge(action.target, ids_node):
+    if action.actor == "hacker":
+        if action.action_type == "move":
+            hacker_position = action.target
+            if action.target in state.ids_positions:
                 detected = True
-    elif action.action_type == "block_node":
-        blocked_nodes.add(action.target)
-    elif action.action_type == "block_edge":
-        left, right = action.target.split("|", 1)
-        blocked_edges.add(edge_key(left, right))
-    elif action.action_type == "upgrade":
-        upgraded_nodes.add(action.target)
-    elif action.action_type == "detect":
-        detected = action.target == "detected"
+            for ids_node in state.ids_positions:
+                if graph.has_edge(action.target, ids_node):
+                    detected = True
+        elif action.action_type == "scan":
+            detected = True
+        elif action.action_type == "attack":
+            detected = True
+    else:
+        if action.action_type == "block_node":
+            blocked_nodes.add(action.target)
+        elif action.action_type == "block_edge":
+            left, right = action.target.split("|", 1)
+            blocked_edges.add(edge_key(left, right))
+        elif action.action_type == "upgrade":
+            upgraded_nodes.add(action.target)
+        elif action.action_type == "deploy_ids":
+            ids_positions.add(action.target)
+            detected = True
+        elif action.action_type == "detect":
+            detected = action.target == "detected"
 
     if next_turn is None:
         next_turn = "defender" if state.turn == "hacker" else "hacker"
@@ -202,8 +234,8 @@ def apply_action(
         hacker_position=hacker_position,
         blocked_nodes=frozenset(blocked_nodes),
         blocked_edges=frozenset(blocked_edges),
-        firewall_positions=state.firewall_positions,
-        ids_positions=state.ids_positions,
+        firewall_positions=tuple(sorted(firewall_positions)),
+        ids_positions=tuple(sorted(ids_positions)),
         upgraded_nodes=frozenset(upgraded_nodes),
         detected=detected,
         turn=next_turn,

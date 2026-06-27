@@ -98,12 +98,18 @@ class App:
             on_map_change=self._on_map_change,
             on_start_node_change=self._on_start_node_change,
             on_goal_node_change=self._on_goal_node_change,
+            on_adversarial_action_change=self._on_adversarial_action_change,
         )
 
         self._step_gen: Optional[Iterator[StepEvent]] = None
         self._last_auto_step: float = 0.0
         self._toast: str = ""
         self._toast_until: float = 0.0
+        self._right_panel_scroll: int = 0
+        self._right_panel_follow_tail: bool = True
+        self._right_panel_node_id: Optional[str] = None
+        self._right_panel_scroll: int = 0
+        self._right_panel_scroll: int = 0
 
     def _load_map(self, map_name: str) -> bool:
         maps_dir = Path(__file__).parent.parent / "maps"
@@ -114,6 +120,8 @@ class App:
             self.state.selected_map_name = map_name
             self.state.selected_start_node = self._map_data.hacker_start
             self.state.selected_goal_node = self._map_data.goal_nodes[0] if self._map_data.goal_nodes else None
+            self.state.adversarial_game_state = None
+            self.state.adversarial_turn_index = 0
             self._show_toast(f"Đã tải bản đồ: {map_label(map_name)}")
             return True
         except MapLoadError as exc:
@@ -150,6 +158,8 @@ class App:
         self.state.selected_node = None
         self.state.compare_mode = False
         self.state.compare_results.clear()
+        self.state.adversarial_game_state = None
+        self.state.adversarial_turn_index = 0
         self.log_view.update(self.state.run_state.log)
 
     def _on_compare(self) -> None:
@@ -203,6 +213,93 @@ class App:
         self.state.selected_node = node_id
         self._show_toast(f"Goal node: {node_id}")
 
+    def _on_adversarial_action_change(self, action: str) -> None:
+        self.state.adversarial_hacker_action = action
+        if self.state.selected_group_index != 5:
+            return
+        if action == "move":
+            self._ensure_adversarial_game_state()
+            self._show_toast("Chá»n node ká» trÃªn báº£n Ä‘á»“ Ä‘á»ƒ Move")
+            return
+        self._execute_adversarial_turn(action)
+
+    def _execute_adversarial_turn(self, action: str, target: Optional[str] = None) -> None:
+        if not self._map_data or self.state.selected_group_index != 5:
+            return
+        from algorithms.adversarial.game_loop import play_hacker_turn
+
+        game_state = self._ensure_adversarial_game_state()
+        if game_state is None:
+            return
+        name = self._current_adversarial_algorithm_name()
+        try:
+            result = play_hacker_turn(
+                self._map_data.graph,
+                game_state,
+                self._current_goals(),
+                action,
+                target,
+                name,
+                self.state.game_depth,
+                step_index=len(self.state.run_state.steps),
+            )
+        except ValueError as exc:
+            self._show_toast(str(exc), duration=3.0)
+            return
+
+        run = self.state.run_state
+        self._step_gen = None
+        run.algorithm_name = name
+        run.status = "paused"
+        self.state.adversarial_game_state = result.state
+        self.state.adversarial_turn = result.state.turn
+        self.state.adversarial_target_node = target
+        for step in result.steps:
+            self._append_step_event(step)
+        self.control_panel._build_widgets()
+        if result.terminal:
+            outcome = result.steps[-1].data.get("outcome_title") if result.steps else None
+            reason = result.steps[-1].data.get("outcome_reason") if result.steps else None
+            if outcome and reason:
+                self._show_toast(f"{outcome}: {reason}", duration=4.0)
+            else:
+                winner = "Hacker" if result.winner == "hacker" else "AI Defender"
+                self._show_toast(f"{winner} kết thúc ván đối kháng", duration=4.0)
+        elif result.defender_action:
+            self._show_toast(f"AI: {result.defender_action.description}")
+
+    def _ensure_adversarial_game_state(self):
+        if not self._map_data:
+            return None
+        if self.state.adversarial_game_state is None:
+            from algorithms.adversarial.game_loop import new_game_state
+
+            max_turns = int(self._map_data.metadata.get("max_turns", 10)) if self._map_data.metadata else 10
+            self.state.adversarial_game_state = new_game_state(
+                self._map_data.graph,
+                self._current_start(),
+                max_turns=max_turns,
+            )
+            self.state.adversarial_turn = "hacker"
+        return self.state.adversarial_game_state
+
+    def _current_adversarial_algorithm_name(self) -> str:
+        return ("Minimax", "Alpha-Beta", "Expectimax")[min(self.state.selected_algo_index, 2)]
+
+    def _append_step_event(self, step: StepEvent) -> None:
+        run = self.state.run_state
+        run.steps.append(step)
+        run.current_step_index = len(run.steps) - 1
+        run.metrics = self._metrics_from_step(step, success=(step.event_type == "found"))
+        run.log.log(self._format_step_log(step), self._log_level_for_step(step))
+        self.log_view.update(run.log)
+        if step.event_type == "found":
+            run.status = "success"
+        elif self._is_failure_step(step):
+            run.status = "failure"
+        elif run.status == "ready":
+            run.status = "paused"
+
     def _current_start(self) -> str:
         if not self._map_data:
             return ""
@@ -211,9 +308,17 @@ class App:
             return selected
         return self._map_data.hacker_start
 
+    def _current_hacker_position(self) -> str:
+        game_state = self.state.adversarial_game_state
+        if self.state.selected_group_index == 5 and game_state is not None:
+            return game_state.hacker_position
+        return self._current_start()
+
     def _current_goals(self) -> list[str]:
         if not self._map_data:
             return []
+        if self.state.selected_group_index == 5:
+            return list(self._map_data.goal_nodes)
         selected = self.state.selected_goal_node
         if selected and self._map_data.graph.has_node(selected):
             return [selected]
@@ -892,10 +997,16 @@ class App:
     def _format_adversarial_log(self, step: StepEvent) -> str:
         prefix = self._step_prefix(step)
         data = step.data
-        action = self._format_action(data.get("action"))
+        action = self._format_action(data.get("defender_action") or data.get("action"))
         value = data.get("expected_value", data.get("evaluation", step.total_cost))
         turn = data.get("turn", "hacker")
         depth = data.get("depth", "-")
+
+        if data.get("terminal"):
+            title = data.get("outcome_title", "Ván đối kháng kết thúc")
+            reason = data.get("outcome_reason", "-")
+            path = self._format_path(step.path)
+            return f"{prefix} {title}: {reason} Đường hacker: {path}."
 
         if step.event_type == "info":
             if step.algorithm == "Expectimax":
@@ -940,6 +1051,8 @@ class App:
             return f"Defender chặn cạnh {target.replace('|', '-')}"
         if action_type == "upgrade":
             return f"Defender nâng cấp {target}"
+        if action_type == "deploy_ids":
+            return f"Defender deploy IDS at {target}"
         if action_type == "detect":
             return "IDS phát hiện Hacker" if target == "detected" else "IDS bỏ sót Hacker"
         return getattr(action, "description", str(action))
@@ -995,7 +1108,11 @@ class App:
 
                 self.control_panel.handle_event(event)
                 self._handle_top_nav_event(event)
-                self.graph_view.handle_event(event)
+                self._handle_right_panel_event(event)
+                if self.state.selected_group_index == 5:
+                    self._handle_adversarial_graph_event(event)
+                else:
+                    self.graph_view.handle_event(event)
                 self.log_view.handle_event(event)
 
             run = self.state.run_state
@@ -1020,7 +1137,7 @@ class App:
         self._draw_top_nav()
 
         current_step = run.current_step
-        hacker_pos = self._current_start()
+        hacker_pos = self._current_hacker_position()
         goals = self._current_goals()
         self.graph_view.draw(
             self.screen,
@@ -1052,6 +1169,20 @@ class App:
         self.stats_view.rect = self.layout.stats_overlay
         self.control_panel.rect = self.layout.control_panel
         self.control_panel._build_widgets()
+        self._right_panel_scroll = 0
+        self._right_panel_follow_tail = True
+
+    def _handle_adversarial_graph_event(self, event: pygame.event.Event) -> bool:
+        self.graph_view.handle_event(event)
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return False
+        if not self.layout.graph_area.collidepoint(event.pos):
+            return False
+        target = self.state.selected_node
+        if not target:
+            return False
+        self._execute_adversarial_turn("move", target)
+        return True
 
     def _handle_top_nav_event(self, event: pygame.event.Event) -> bool:
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
@@ -1067,6 +1198,8 @@ class App:
                     self.graph_view.set_graph(self._map_data.graph)
                 self._on_reset()
                 self.control_panel._build_widgets()
+                self._right_panel_scroll = 0
+                self._right_panel_follow_tail = True
                 return True
         return False
 
@@ -1173,19 +1306,29 @@ class App:
             return
         graph = self._map_data.graph
         start_node = self._current_start()
+        hacker_position = self._current_hacker_position()
         goal_nodes = self._current_goals()
-        node_id = self.state.selected_node or self.state.hovered_node or start_node
+        node_id = self.state.selected_node or self.state.hovered_node or hacker_position
         node = graph.get_node(node_id)
         if not node:
             return
-        x = rect.x + 18
-        y = rect.y + 58
-        legend_h = max(214, min(268, int(rect.height * 0.42)))
+        if node_id != self._right_panel_node_id:
+            self._right_panel_node_id = node_id
+            self._right_panel_scroll = 0
+
+        legend_h = 214
         legend_top = rect.bottom - legend_h
         info_bottom = legend_top - 10
+        scroll_area = pygame.Rect(rect.x + 10, rect.y + 42, rect.width - 20, max(60, info_bottom - rect.y - 42))
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(scroll_area)
+
+        x = rect.x + 18
+        y = rect.y + 58 - self._right_panel_scroll
         is_start = node.id == start_node
+        is_hacker_position = node.id == hacker_position
         is_goal = node.id in goal_nodes
-        node_color = COLOR_NODE_HACKER if is_start else get_node_color(node.kind)
+        node_color = COLOR_NODE_HACKER if (is_hacker_position or is_start) else get_node_color(node.kind)
         if is_goal:
             node_color = COLOR_NODE_SERVER
         draw_network_node(
@@ -1194,13 +1337,21 @@ class App:
             (x + 28, y + 28),
             22,
             node_color,
-            hacker=is_start,
+            hacker=is_hacker_position,
             selected=True,
         )
         name = get_font(18, bold=True).render(node.id, True, COLOR_TEXT_PRIMARY)
         self.screen.blit(name, (x + 72, y + 18))
         y += 58
-        if is_start and is_goal:
+        if is_hacker_position and is_goal:
+            role = "Hacker tại mục tiêu"
+            status_text = "Đã tới mục tiêu"
+            status_color = COLOR_ACCENT
+        elif is_hacker_position and not is_start:
+            role = "Hacker hiện tại"
+            status_text = "Đang xâm nhập"
+            status_color = COLOR_TEXT_ERROR
+        elif is_start and is_goal:
             role = "Start + Goal"
             status_text = "Start trùng Goal"
             status_color = COLOR_ACCENT
@@ -1216,7 +1367,8 @@ class App:
             role = "Node trung gian"
             status_text = "An toàn"
             status_color = COLOR_TEXT_PRIMARY
-        rows = [
+
+        info_lines = [
             ("Vai trò", role),
             ("Loại", NODE_KIND_LABELS.get(node.kind, node.kind)),
             ("Mức bảo mật", f"{node.security_level} / 10"),
@@ -1224,24 +1376,38 @@ class App:
             ("Thuộc Zone", node.zone or "Không có"),
             ("IDS giám sát", "Có" if node.monitored else "Không"),
         ]
-        for label, value in rows:
+
+        line_font = get_font(12)
+        value_font = get_font(12, bold=True)
+        max_width = rect.width - 156
+        for label, value in info_lines:
             color = status_color if label == "Trạng thái" else COLOR_TEXT_PRIMARY
-            if y + 19 > info_bottom:
-                break
-            draw_text_fit(self.screen, label + ":", pygame.Rect(x, y, 112, 19), COLOR_TEXT_SECONDARY, size=12)
-            draw_text_fit(self.screen, value, pygame.Rect(x + 118, y, rect.width - 146, 19), color, size=12)
-            y += 20
+            draw_text_fit(self.screen, label + ":", pygame.Rect(x, y, 112, 22), COLOR_TEXT_SECONDARY, size=12)
+            wrapped = self._wrap_panel_text(str(value), value_font, max_width)
+            line_h = max(18, value_font.get_linesize() + 2)
+            for i, part in enumerate(wrapped):
+                self.screen.blit(value_font.render(part, True, color), (x + 118, y + i * line_h))
+            y += max(22, len(wrapped) * line_h)
 
-        if y + 40 <= info_bottom:
-            conn_title = get_font(12, bold=True).render("Kết nối:", True, COLOR_TEXT_SECONDARY)
-            self.screen.blit(conn_title, (x, y))
-            y += 22
-            max_conn = max(0, (info_bottom - y) // 18)
-            for neighbor, cost, _ in graph.neighbors_with_cost(node.id, ignore_blocked=False)[:max_conn]:
-                text = f"- {neighbor} (chi phí: {cost:.0f})"
-                draw_text_fit(self.screen, text, pygame.Rect(x + 10, y, rect.width - 44, 18), (228, 242, 255), size=11)
-                y += 18
+        y += 8
+        conn_title = get_font(12, bold=True).render("Kết nối:", True, COLOR_TEXT_SECONDARY)
+        self.screen.blit(conn_title, (x, y))
+        y += 22
+        for neighbor, cost, _ in graph.neighbors_with_cost(node.id, ignore_blocked=False):
+            text = f"- {neighbor} (chi phí: {cost:.0f})"
+            wrapped = self._wrap_panel_text(text, line_font, rect.width - 44)
+            line_h = line_font.get_linesize() + 1
+            for part in wrapped:
+                self.screen.blit(line_font.render(part, True, (228, 242, 255)), (x + 10, y))
+                y += line_h
+            y += 2
 
+        max_scroll = max(0, y + self._right_panel_scroll - scroll_area.bottom + 12)
+        if self._right_panel_scroll > max_scroll:
+            self._right_panel_scroll = max_scroll
+
+        self.screen.set_clip(old_clip)
+        pygame.draw.rect(self.screen, (4, 13, 24), pygame.Rect(rect.x + 1, legend_top, rect.width - 2, legend_h - 1))
         pygame.draw.line(self.screen, COLOR_PANEL_BORDER, (rect.x, legend_top), (rect.right, legend_top), 1)
         self._draw_legend(rect, legend_top + 14)
 
@@ -1260,14 +1426,12 @@ class App:
             (COLOR_EDGE_DEFAULT, "Kết nối"),
         ]
         y += 30
-        available_h = rect.bottom - y - 10
-        step = max(16, min(24, available_h // max(1, len(items))))
         for color, label in items:
             mark = pygame.Rect(rect.x + 20, y + 2, 14, 14)
             pygame.draw.rect(self.screen, color, mark, border_radius=4)
             pygame.draw.rect(self.screen, (220, 235, 255), mark, 1, border_radius=4)
-            draw_text_fit(self.screen, label, pygame.Rect(rect.x + 44, y, rect.width - 60, step), COLOR_TEXT_SECONDARY, size=12)
-            y += step
+            draw_text_fit(self.screen, label, pygame.Rect(rect.x + 44, y, rect.width - 60, 18), COLOR_TEXT_SECONDARY, size=12)
+            y += 20
 
     def _draw_toast(self) -> None:
         if not self._toast or time.time() > self._toast_until:
@@ -1284,8 +1448,74 @@ class App:
         pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, pygame.Rect(box_x, box_y, width + 24, height + 12), 1, border_radius=7)
         self.screen.blit(surf, (box_x + 12, box_y + 6))
 
+    def _handle_right_panel_event(self, event: pygame.event.Event) -> bool:
+        rect = self.layout.right_panel
+        if not rect.collidepoint(pygame.mouse.get_pos()):
+            return False
+        if event.type == pygame.MOUSEWHEEL:
+            self._right_panel_scroll = max(0, self._right_panel_scroll - event.y * 3)
+            self._right_panel_follow_tail = False
+            return True
+        return False
+
+    def _wrap_panel_text(self, text: str, font: pygame.font.Font, max_width: int) -> list[str]:
+        words = str(text).split(" ")
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = word if not current else f"{current} {word}"
+            if font.size(candidate)[0] <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            while font.size(word)[0] > max_width and len(word) > 1:
+                cut = len(word)
+                while cut > 1 and font.size(word[:cut])[0] > max_width:
+                    cut -= 1
+                lines.append(word[:cut])
+                word = word[cut:]
+            current = word
+        if current:
+            lines.append(current)
+        return lines or [""]
+
     def _draw_map_title(self) -> None:
         assert self._map_data is not None
         font = get_font(11)
         surf = font.render(map_label(self.state.selected_map_name), True, COLOR_TEXT_SECONDARY)
         self.screen.blit(surf, (self.layout.graph_area.x + 142, self.layout.graph_area.y + 14))
+
+    def _handle_right_panel_event(self, event: pygame.event.Event) -> bool:
+        rect = self.layout.right_panel
+        if event.type != pygame.MOUSEWHEEL:
+            return False
+        if not rect.collidepoint(pygame.mouse.get_pos()):
+            return False
+        self._right_panel_scroll = max(0, self._right_panel_scroll - event.y * 24)
+        self._right_panel_follow_tail = False
+        return True
+
+    def _wrap_panel_text(self, text: str, font: pygame.font.Font, max_width: int) -> list[str]:
+        words = str(text).split()
+        if not words:
+            return [""]
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = word if not current else f"{current} {word}"
+            if font.size(candidate)[0] <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            current = word
+            while font.size(current)[0] > max_width and len(current) > 1:
+                cut = len(current)
+                while cut > 1 and font.size(current[:cut])[0] > max_width:
+                    cut -= 1
+                lines.append(current[:cut])
+                current = current[cut:]
+        if current:
+            lines.append(current)
+        return lines or [""]

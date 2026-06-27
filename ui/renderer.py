@@ -67,7 +67,7 @@ class GraphRenderer:
         span_x = max(1, max_x - min_x)
         span_y = max(1, max_y - min_y)
         scale = min((rect.width - padding * 2) / span_x, (rect.height - padding * 2) / span_y)
-        self._scale = max(0.72, min(scale, 1.12))
+        self._scale = max(0.58, min(scale, 1.12))
         graph_w = span_x * self._scale
         graph_h = span_y * self._scale
         self._tx = rect.x + (rect.width - graph_w) / 2 - min_x * self._scale
@@ -108,11 +108,32 @@ class GraphRenderer:
         blocked_path_samples = step.data.get("blocked_path_samples", []) if step else []
         open_path_samples = step.data.get("open_path_samples", []) if step else []
         virtual_blocked_nodes = set(step.data.get("blocked_nodes", [])) if step else set()
+        virtual_blocked_edges = {
+            tuple(sorted(edge))
+            for edge in (step.data.get("blocked_edges", []) if step else [])
+            if isinstance(edge, (list, tuple)) and len(edge) == 2
+        }
+        attack_edges = {
+            tuple(sorted(edge))
+            for edge in (step.data.get("attack_edges", []) if step else [])
+            if isinstance(edge, (list, tuple)) and len(edge) == 2
+        }
+        defender_edges = {
+            tuple(sorted(edge))
+            for edge in (step.data.get("defender_edges", []) if step else [])
+            if isinstance(edge, (list, tuple)) and len(edge) == 2
+        }
         hidden_nodes = set(step.data.get("hidden_nodes", [])) if step else set()
         teacher_view = bool(step.data.get("teacher_view", False)) if step else False
         local_mode = step.data.get("local_search_mode") == "heuristic_path" if step else False
         heuristic_table = step.data.get("heuristic_table", {}) if step else {}
         chosen_neighbor = step.data.get("chosen_neighbor") if step else None
+        belief_nodes = set(step.data.get("belief", [])) if step else set()
+        observed_nodes = set(step.data.get("observed_nodes", [])) if step else set()
+        ai_focus_node = step.data.get("ai_focus_node") if step else None
+        if step:
+            ids_nodes.update(step.data.get("ids_positions", []))
+            upgraded_nodes.update(step.data.get("upgraded_nodes", []))
 
         # Tập edge thuộc final path
         if final_path:
@@ -145,11 +166,21 @@ class GraphRenderer:
             dx, dy = self._node_pos(n_dst)
 
             # Màu cạnh
-            if edge.blocked:
+            edge_key = tuple(sorted((edge.source, edge.target)))
+            blocked_by_state = edge_key in virtual_blocked_edges
+            defended_by_state = edge_key in defender_edges
+            attacked_by_state = edge_key in attack_edges
+            if edge.blocked or blocked_by_state:
                 color = COLOR_EDGE_BLOCKED
                 width = EDGE_WIDTH
+            elif defended_by_state:
+                color = (255, 92, 80)
+                width = EDGE_WIDTH + 2
             elif (edge.source, edge.target) in csp_conflict_edges:
                 color = (255, 82, 82)
+                width = EDGE_WIDTH + 2
+            elif attacked_by_state:
+                color = COLOR_NODE_HACKER
                 width = EDGE_WIDTH + 2
             elif (edge.source, edge.target) in final_edges or (edge.target, edge.source) in final_edges:
                 color = COLOR_EDGE_FINAL
@@ -170,9 +201,22 @@ class GraphRenderer:
                 pygame.draw.rect(self.surface, (95, 14, 22), bg, border_radius=5)
                 pygame.draw.rect(self.surface, (255, 92, 80), bg, 1, border_radius=5)
                 self.surface.blit(err, err_rect)
+            elif blocked_by_state:
+                self._draw_dashed_line(self.surface, COLOR_EDGE_BLOCKED, (sx, sy), (dx, dy), width + 2, dash_len=10, gap_len=7)
+                cross_font = get_font(8, bold=True)
+                cross = cross_font.render("BLOCK", True, (255, 230, 230))
+                cross_rect = cross.get_rect(center=(mid_x, mid_y + 12))
+                pygame.draw.rect(self.surface, (95, 14, 22), cross_rect.inflate(10, 5), border_radius=5)
+                self.surface.blit(cross, cross_rect)
+            elif defended_by_state:
+                self._draw_dashed_line(self.surface, (255, 92, 80), (sx, sy), (dx, dy), width + 1, dash_len=12, gap_len=7)
+                self._draw_edge_tag("DEF", (mid_x, mid_y + 12), (95, 14, 22), (255, 230, 230))
             elif width > EDGE_WIDTH:
                 pygame.draw.line(self.surface, color, (sx, sy), (dx, dy), width + 3)
-                pygame.draw.line(self.surface, (255, 206, 122), (sx, sy), (dx, dy), 2)
+                accent = (255, 236, 180) if attacked_by_state else (255, 206, 122)
+                pygame.draw.line(self.surface, accent, (sx, sy), (dx, dy), 2)
+                if attacked_by_state:
+                    self._draw_edge_tag("ATK", (mid_x, mid_y + 12), (91, 50, 8), (255, 240, 190))
             else:
                 pygame.draw.line(self.surface, (82, 101, 122), (sx, sy), (dx, dy), width + 2)
                 pygame.draw.line(self.surface, color, (sx, sy), (dx, dy), width)
@@ -249,6 +293,10 @@ class GraphRenderer:
             # Viền trạng thái đặc biệt
             if state == "current":
                 pygame.draw.circle(self.surface, (255, 255, 100), (nx, ny), r, 3)
+                pygame.draw.line(self.surface, (255, 255, 100), (nx - r - 6, ny), (nx - r - 2, ny), 2)
+                pygame.draw.line(self.surface, (255, 255, 100), (nx + r + 2, ny), (nx + r + 6, ny), 2)
+                pygame.draw.line(self.surface, (255, 255, 100), (nx, ny - r - 6), (nx, ny - r - 2), 2)
+                pygame.draw.line(self.surface, (255, 255, 100), (nx, ny + r + 2), (nx, ny + r + 6), 2)
             elif state == "frontier":
                 pygame.draw.circle(self.surface, (255, 165, 0), (nx, ny), r, 2)
             elif state == "final":
@@ -279,6 +327,16 @@ class GraphRenderer:
                 selected=node.id == selected_node,
                 hovered=node.id == hovered_node,
             )
+
+            if node.id in observed_nodes:
+                self._draw_observation_indicator(nx, ny, r)
+
+            if node.id in belief_nodes:
+                self._draw_belief_indicator(nx, ny, r)
+
+            if node.id == ai_focus_node:
+                pygame.draw.circle(self.surface, (255, 92, 80), (nx, ny), r + 18, 3)
+                self._draw_defense_badge(nx, ny, r, "AI", (255, 92, 80), "bottom_left")
 
             if node.id in firewall_nodes:
                 pygame.draw.circle(self.surface, (255, 145, 45), (nx, ny), r + 5, 3)
@@ -343,6 +401,20 @@ class GraphRenderer:
                 q_surf = q_font.render("?", True, (230, 235, 250))
                 qw, qh = q_surf.get_size()
                 self.surface.blit(q_surf, (nx - qw // 2, ny - qh // 2))
+
+    def _draw_edge_tag(
+        self,
+        text: str,
+        center: tuple[int, int],
+        bg_color: tuple[int, int, int],
+        text_color: tuple[int, int, int],
+    ) -> None:
+        font = get_font(8, bold=True)
+        label = font.render(text, True, text_color)
+        rect = label.get_rect(center=center).inflate(10, 5)
+        pygame.draw.rect(self.surface, bg_color, rect, border_radius=5)
+        pygame.draw.rect(self.surface, text_color, rect, 1, border_radius=5)
+        self.surface.blit(label, label.get_rect(center=rect.center))
 
     def _draw_path_overlay(
         self,
@@ -552,6 +624,22 @@ class GraphRenderer:
         rect = pygame.Rect(cx - radius, cy - radius, radius * 2, radius * 2)
         for i in range(0, 360, 28):
             pygame.draw.arc(self.surface, color, rect, math.radians(i), math.radians(i + 16), width)
+
+    def _draw_belief_indicator(self, cx: int, cy: int, r: int) -> None:
+        """Vẽ vòng đứt nét màu tím biểu thị Hacker tiềm năng."""
+        color = (220, 80, 255)
+        self._draw_dashed_circle(cx, cy, r + 12, color, 2)
+        self._draw_dashed_circle(cx, cy, r + 18, color, 1)
+
+    def _draw_observation_indicator(self, cx: int, cy: int, r: int) -> None:
+        """Vẽ vòng sáng màu lam nhạt biểu thị vùng được IDS quét."""
+        color = (100, 200, 255)
+        glow = pygame.Surface(((r + 20) * 2, (r + 20) * 2), pygame.SRCALPHA)
+        center = (r + 20, r + 20)
+        pygame.draw.circle(glow, (*color, 30), center, r + 14)
+        pygame.draw.circle(glow, (*color, 60), center, r + 8)
+        self.surface.blit(glow, (cx - (r + 20), cy - (r + 20)))
+        self._draw_dashed_circle(cx, cy, r + 8, color, 1)
 
     def _draw_node_icon(self, kind: str, cx: int, cy: int, r: int, color: tuple[int, int, int]) -> None:
         """Vẽ icon nhỏ bên trong node theo loại."""

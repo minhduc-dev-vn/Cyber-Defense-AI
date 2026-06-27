@@ -81,3 +81,53 @@ def test_group_2_step_builds_selected_algorithm(app):
     assert step is not None
     assert step.algorithm == "A*"
     assert {"g", "h", "f"}.issubset(step.data)
+
+
+def test_adversarial_click_move_runs_ai_response(app):
+    app.state.selected_group_index = 5
+    app.state.selected_algo_index = 1
+    app._load_map("adversarial_game")
+    app.graph_view.set_graph(app._map_data.graph)
+    app.control_panel._build_widgets()
+    app.state.adversarial_hacker_action = "move"
+
+    target = app._map_data.graph.get_node("Gateway")
+    assert target is not None
+    assert app.graph_view._renderer is not None
+    pos = app.graph_view._renderer._node_pos(target)
+    event = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": pos})
+    app._handle_adversarial_graph_event(event)
+
+    game_state = app.state.adversarial_game_state
+    assert game_state is not None
+    assert game_state.hacker_position == "Gateway"
+    assert len(game_state.history) == 2
+    assert app.state.run_state.current_step is not None
+    assert app.state.run_state.current_step.data["defender_action"] is not None
+
+    assert app.control_panel.btn_adversarial_reset is not None
+    assert app.control_panel.adversarial_action_buttons == []
+    app.control_panel.btn_adversarial_reset.on_click()
+
+    assert app.state.adversarial_game_state is None
+    assert app.state.run_state.current_step is None
+
+
+def test_adversarial_start_point_can_switch_to_pc2(app):
+    app.state.selected_group_index = 5
+    app._load_map("adversarial_game")
+    app.graph_view.set_graph(app._map_data.graph)
+    app.control_panel._build_widgets()
+
+    labels = [button.label for button in app.control_panel.adversarial_start_buttons]
+    assert labels == ["PC1", "PC2"]
+
+    app.control_panel.adversarial_start_buttons[1].on_click()
+    assert app.state.selected_start_node == "PC2"
+    assert app.state.adversarial_game_state is None
+    assert app._current_hacker_position() == "PC2"
+
+    app._execute_adversarial_turn("move", "VPN")
+    game_state = app.state.adversarial_game_state
+    assert game_state is not None
+    assert game_state.hacker_position == "VPN"

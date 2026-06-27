@@ -151,11 +151,38 @@ class StatsView:
                 rows.append(("Biên", ", ".join(step.frontier[:6]) if step.frontier else "-"))
             return rows
 
+        if "belief" in data:
+            belief = data.get("belief", [])
+            blocked = data.get("blocked_nodes", [])
+            observed = data.get("observed_nodes", [])
+            rows = [
+                ("Belief", ", ".join(str(n) for n in belief) if belief else "∅ (trống)"),
+                ("Đang xét", step.current_node if step.current_node else "-"),
+                ("Đã chặn", ", ".join(str(n) for n in blocked) if blocked else "(chưa có)"),
+            ]
+            if observed:
+                rows.append(("IDS quét", ", ".join(str(n) for n in observed[:4])))
+            return rows
+
         rows = [
             ("Biên", ", ".join(step.frontier[:6]) if step.frontier else "-"),
             ("Đã duyệt", ", ".join(step.explored[-8:]) if step.explored else "-"),
             ("Đang xét", step.current_node if step.current_node else "-"),
         ]
+        if "game_state" in data:
+            blocked = data.get("blocked_nodes", [])
+            blocked_edges = data.get("blocked_edges", [])
+            rows = [
+                ("Turn", str(data.get("turn", "-"))),
+                ("Hacker", str(data.get("hacker_position", step.current_node or "-"))),
+                ("Detected", "Yes" if data.get("detected") else "No"),
+                ("Turns left", str(data.get("remaining_turns", "-"))),
+            ]
+            if blocked:
+                rows.append(("Blocked", ", ".join(str(n) for n in blocked[:3])))
+            elif blocked_edges:
+                rows.append(("Blocked", ", ".join("-".join(edge) for edge in blocked_edges[:2])))
+            return rows
         if show_details and data:
             for key in ("evaluation", "expected_value", "defense_value", "risk_cost", "blocked_paths", "open_paths", "belief", "plan"):
                 if key in data:
@@ -191,6 +218,10 @@ class StatsView:
             "success": "Thành công",
             "failure": "Thất bại",
         }.get(status, status)
+        adversarial_data = self._adversarial_data(step, metrics)
+        if adversarial_data:
+            self._draw_adversarial_result(surface, rect, adversarial_data, status_color, status_label)
+            return
         defense_data = self._defense_data(step, metrics)
         if defense_data:
             self._draw_defense_result(surface, rect, defense_data, status_color, status_label)
@@ -202,6 +233,10 @@ class StatsView:
         csp_data = self._csp_data(step, metrics)
         if csp_data:
             self._draw_csp_result(surface, rect, csp_data, status_color, status_label)
+            return
+        complex_data = self._complex_env_data(step, metrics)
+        if complex_data:
+            self._draw_complex_env_result(surface, rect, complex_data, status_color, status_label)
             return
         rows = [
             ("Thuật toán", algorithm),
@@ -270,12 +305,24 @@ class StatsView:
             )
 
     def _draw_path(self, surface: pygame.Surface, rect: pygame.Rect, step: Optional[StepEvent], metrics: Optional[AlgorithmMetrics]) -> None:
+        adversarial_data = self._adversarial_data(step, metrics)
         defense_data = self._defense_data(step, metrics)
         csp_data = self._csp_data(step, metrics)
         local_data = self._local_search_data(step, metrics)
-        title_text = "PHÒNG THỦ" if defense_data else ("PHÂN VÙNG" if csp_data else ("HEURISTIC" if local_data else "ĐƯỜNG ĐI"))
+        complex_data = self._complex_env_data(step, metrics)
+        title_text = (
+            "VÁN ĐỐI KHÁNG" if adversarial_data
+            else "PHÒNG THỦ" if defense_data
+            else "PHÂN VÙNG" if csp_data
+            else "HEURISTIC" if local_data
+            else "KẾ HOẠCH" if complex_data
+            else "ĐƯỜNG ĐI"
+        )
         title = get_font(13, bold=True).render(title_text, True, (116, 195, 255))
         surface.blit(title, (rect.x + 14, rect.y + 12))
+        if adversarial_data:
+            self._draw_adversarial_summary(surface, rect, adversarial_data)
+            return
         if defense_data:
             self._draw_defense_summary(surface, rect, defense_data)
             return
@@ -284,6 +331,9 @@ class StatsView:
             return
         if local_data:
             self._draw_local_search_summary(surface, rect, local_data)
+            return
+        if complex_data:
+            self._draw_complex_env_summary(surface, rect, complex_data)
             return
         path = step.path if step else (metrics.path if metrics else [])
         if not path:
@@ -314,6 +364,98 @@ class StatsView:
                 pygame.draw.line(surface, COLOR_EDGE_DEFAULT, start, end, 2)
                 pygame.draw.polygon(surface, COLOR_EDGE_DEFAULT, [(end[0], end[1]), (end[0] - 7, end[1] - 4), (end[0] - 7, end[1] + 4)])
 
+    def _adversarial_data(self, step: Optional[StepEvent], metrics: Optional[AlgorithmMetrics]) -> Optional[dict]:
+        if step and "game_state" in (step.data or {}):
+            return step.data
+        if metrics and "game_state" in (metrics.extra or {}):
+            return metrics.extra
+        return None
+
+    def _draw_adversarial_result(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        data: dict,
+        status_color: tuple[int, int, int],
+        status_label: str,
+    ) -> None:
+        terminal = bool(data.get("terminal"))
+        winner = data.get("winner")
+        if terminal and winner == "hacker":
+            conclusion = str(data.get("outcome_title") or "Hacker thành công")
+            conclusion_color = COLOR_TEXT_SUCCESS
+            result_text = "Hacker thắng"
+        elif terminal and winner == "defender":
+            conclusion = str(data.get("outcome_title") or "AI phòng thủ thành công")
+            conclusion_color = COLOR_TEXT_ERROR
+            result_text = "AI thắng"
+        else:
+            conclusion = "Ván đang diễn ra"
+            conclusion_color = status_color
+            result_text = status_label
+
+        rows = [
+            ("Kết luận", conclusion),
+            ("Lý do", str(data.get("outcome_reason") or "chưa kết thúc")),
+            ("Hacker", str(data.get("hacker_position", "-"))),
+            ("Lượt còn", str(data.get("remaining_turns", "-"))),
+            ("Phát hiện", "Có" if data.get("detected") else "Không"),
+            ("Trạng thái", result_text),
+        ]
+        y = rect.y + 34
+        label_w = 78
+        value_w = rect.width - label_w - 32
+        for label, value in rows:
+            row_h = 32 if label == "Lý do" else 18
+            color = conclusion_color if label in {"Kết luận", "Trạng thái"} else COLOR_TEXT_PRIMARY
+            draw_text_fit(surface, label + ":", pygame.Rect(rect.x + 14, y, label_w, row_h), COLOR_TEXT_PRIMARY, size=8, bold=True)
+            if label == "Lý do":
+                self._draw_wrapped_text(
+                    surface,
+                    value,
+                    pygame.Rect(rect.x + 14 + label_w, y, value_w, row_h),
+                    color,
+                    size=7,
+                )
+            else:
+                draw_text_fit(
+                    surface,
+                    value,
+                    pygame.Rect(rect.x + 14 + label_w, y, value_w, row_h),
+                    color,
+                    size=8,
+                    bold=label == "Kết luận",
+                )
+            y += row_h
+
+    def _draw_adversarial_summary(self, surface: pygame.Surface, rect: pygame.Rect, data: dict) -> None:
+        path = data.get("hacker_path") or []
+        if not path and data.get("hacker_position"):
+            path = [data.get("hacker_position")]
+        blocked_nodes = data.get("blocked_nodes", [])
+        blocked_edges = data.get("blocked_edges", [])
+        defender_action = data.get("defender_action")
+        action_text = getattr(defender_action, "description", "") if defender_action else "chưa phản ứng"
+        rows = [
+            ("Đường hacker", " -> ".join(str(node) for node in path) if path else "-"),
+            ("AI vừa làm", action_text),
+            ("Node bị chặn", ", ".join(str(n) for n in blocked_nodes[:4]) if blocked_nodes else "-"),
+            ("Cạnh bị chặn", ", ".join("-".join(edge) for edge in blocked_edges[:3]) if blocked_edges else "-"),
+        ]
+        y = rect.y + 38
+        for label, value in rows:
+            if y > rect.bottom - 22:
+                break
+            draw_text_fit(surface, label + ":", pygame.Rect(rect.x + 14, y, rect.width - 28, 16), COLOR_TEXT_PRIMARY, size=8, bold=True)
+            self._draw_wrapped_text(
+                surface,
+                str(value),
+                pygame.Rect(rect.x + 14, y + 16, rect.width - 28, 28),
+                COLOR_TEXT_SECONDARY if value == "-" else COLOR_TEXT_PRIMARY,
+                size=7,
+            )
+            y += 42
+
     def _defense_data(self, step: Optional[StepEvent], metrics: Optional[AlgorithmMetrics]) -> Optional[dict]:
         if step and step.data.get("defense_config"):
             return step.data
@@ -334,6 +476,155 @@ class StatsView:
         if metrics and metrics.extra.get("local_search_mode") == "heuristic_path":
             return metrics.extra
         return None
+
+    def _complex_env_data(self, step: Optional[StepEvent], metrics: Optional[AlgorithmMetrics]) -> Optional[dict]:
+        """Detect data from Complex Environment algorithms (Belief/AND-OR)."""
+        if step and "belief" in (step.data or {}):
+            return step.data
+        if metrics and "belief" in (metrics.extra or {}):
+            return metrics.extra
+        return None
+
+    def _draw_complex_env_result(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        data: dict,
+        status_color: tuple[int, int, int],
+        status_label: str,
+    ) -> None:
+        belief = data.get("belief", [])
+        blocked = data.get("blocked_nodes", [])
+        observed = data.get("observed_nodes", [])
+        plan = data.get("plan", data.get("plan_lines", []))
+        plan_tree = data.get("plan_tree")
+        algo_type = "AND-OR" if plan_tree is not None else ("Partial" if observed else "Sensorless")
+        rows = [
+            ("Mô phỏng", f"Belief-State ({algo_type})"),
+            ("Belief hiện tại", f"{len(belief)} vị trí: " + ("∅" if not belief else ", ".join(str(n) for n in belief))),
+            ("Đã chặn", ", ".join(str(n) for n in blocked) if blocked else "(chưa có)"),
+            ("IDS quét", ", ".join(str(n) for n in observed) if observed else "-"),
+            ("Kế hoạch", f"{len(plan)} bước" if isinstance(plan, list) and plan else "Đang tính..."),
+            ("Trạng thái", status_label),
+        ]
+        y = rect.y + 36
+        label_w = min(116, max(88, rect.width // 3))
+        value_w = max(40, rect.width - label_w - 32)
+        value_font = get_font(8)
+        line_h = value_font.get_linesize()
+        max_y = rect.bottom - 6
+        for label, value in rows:
+            color = (
+                status_color if label == "Trạng thái"
+                else (220, 80, 255) if label == "Belief hiện tại"
+                else (100, 200, 255) if label == "IDS quét"
+                else COLOR_TEXT_PRIMARY
+            )
+            wrapped = self._wrap_text(str(value), value_font, value_w)
+            row_h = max(16, len(wrapped) * line_h)
+            if y + row_h > max_y:
+                row_h = max(14, max_y - y)
+            draw_text_fit(surface, label + ":", pygame.Rect(rect.x + 14, y, label_w, min(row_h, 18)), COLOR_TEXT_PRIMARY, size=8, bold=True)
+            old_clip = surface.get_clip()
+            surface.set_clip(pygame.Rect(rect.x + 14 + label_w, y, value_w, row_h))
+            for i, line in enumerate(wrapped):
+                line_y = y + i * line_h
+                if line_y + line_h > y + row_h:
+                    break
+                surface.blit(value_font.render(line, True, color), (rect.x + 14 + label_w, line_y))
+            surface.set_clip(old_clip)
+            y += row_h
+            if y >= max_y:
+                break
+
+    def _draw_complex_env_summary(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        data: dict,
+    ) -> None:
+        """Right panel: display plan steps / AND-OR tree."""
+        belief = data.get("belief", [])
+        blocked = data.get("blocked_nodes", [])
+        plan = data.get("plan", [])
+        plan_tree = data.get("plan_tree")
+        plan_lines = data.get("plan_lines", [])
+        observed = data.get("observed_nodes", [])
+
+        y = rect.y + 34
+        w = rect.width - 28
+
+        # Belief state bar
+        belief_label = get_font(9, bold=True).render("Belief (vùng nghi ngờ):", True, (220, 80, 255))
+        surface.blit(belief_label, (rect.x + 14, y))
+        y += 16
+        if belief:
+            chip_w, chip_h, gap = 52, 18, 5
+            x_chip = rect.x + 14
+            max_chip_y = rect.bottom - 22
+            for node_id in belief:
+                if x_chip + chip_w > rect.right - 14:
+                    x_chip = rect.x + 14
+                    y += chip_h + gap
+                if y + chip_h > max_chip_y:
+                    break
+                chip_rect = pygame.Rect(x_chip, y, chip_w, chip_h)
+                pygame.draw.rect(surface, (55, 12, 70), chip_rect, border_radius=5)
+                pygame.draw.rect(surface, (220, 80, 255), chip_rect, 1, border_radius=5)
+                draw_text_fit(surface, str(node_id), chip_rect, (230, 190, 255), size=8, bold=True)
+                x_chip += chip_w + gap
+        else:
+            draw_text_fit(surface, "∅  Hacker không còn đường xâm nhập", pygame.Rect(rect.x + 14, y, w, 18), COLOR_TEXT_SUCCESS, size=8, bold=True)
+        y += 24
+
+        # Blocked nodes
+        if blocked:
+            block_label = get_font(9, bold=True).render("Đã chặn:", True, COLOR_TEXT_ERROR)
+            surface.blit(block_label, (rect.x + 14, y))
+            draw_text_fit(
+                surface,
+                ", ".join(str(n) for n in blocked),
+                pygame.Rect(rect.x + 80, y, w - 66, 16),
+                COLOR_TEXT_ERROR,
+                size=8,
+            )
+            y += 18
+
+        # IDS observed
+        if observed:
+            ids_label = get_font(9, bold=True).render("IDS quét:", True, (100, 200, 255))
+            surface.blit(ids_label, (rect.x + 14, y))
+            draw_text_fit(
+                surface,
+                ", ".join(str(n) for n in observed[:5]),
+                pygame.Rect(rect.x + 80, y, w - 66, 16),
+                (100, 200, 255),
+                size=8,
+            )
+            y += 18
+
+        # Plan / tree
+        pygame.draw.line(surface, (30, 55, 80), (rect.x + 14, y), (rect.right - 14, y), 1)
+        y += 6
+        plan_title_text = "Cây kế hoạch AND-OR:" if plan_tree is not None else ("Các bước phòng thủ:" if plan else "Đang tìm kế hoạch...")
+        plan_title = get_font(9, bold=True).render(plan_title_text, True, (116, 195, 255))
+        surface.blit(plan_title, (rect.x + 14, y))
+        y += 16
+        lines_to_show = plan_lines if plan_lines else ([item for item in plan] if isinstance(plan, list) else [])
+        for line in lines_to_show[:6]:
+            if y + 14 > rect.bottom - 6:
+                break
+            indent = 0
+            text = str(line)
+            while text.startswith(" "):
+                indent += 8
+                text = text[1:]
+            is_leaf = "Safe" in text or "∅" in text or "an toàn" in text.lower()
+            color = COLOR_TEXT_SUCCESS if is_leaf else COLOR_TEXT_PRIMARY
+            draw_text_fit(surface, text, pygame.Rect(rect.x + 14 + indent, y, w - indent, 14), color, size=8)
+            y += 14
+        if not lines_to_show and y + 18 < rect.bottom:
+            draw_text_fit(surface, "BFS đang xét các kết hợp chặn...", pygame.Rect(rect.x + 14, y, w, 16), COLOR_TEXT_SECONDARY, size=8)
 
     def _draw_local_search_result(
         self,
@@ -361,26 +652,59 @@ class StatsView:
             y += row_h
 
     def _draw_local_search_summary(self, surface: pygame.Surface, rect: pygame.Rect, data: dict) -> None:
-        y = rect.y + 38
+        y = rect.y + 34
         path = data.get("path_so_far") or []
         path_text = " -> ".join(str(node) for node in path) if isinstance(path, list) and path else "-"
-        draw_text_fit(surface, "Đường hiện tại:", pygame.Rect(rect.x + 14, y, 116, 18), COLOR_TEXT_PRIMARY, size=8, bold=True)
-        self._draw_wrapped_text(surface, path_text, pygame.Rect(rect.x + 130, y, rect.width - 144, 38), COLOR_TEXT_PRIMARY, size=8)
-        y += 42
-        draw_text_fit(surface, "h(láng giềng):", pygame.Rect(rect.x + 14, y, rect.width - 28, 18), COLOR_TEXT_PRIMARY, size=8, bold=True)
-        y += 20
-        for row in (data.get("neighbor_scores") or [])[:4]:
+        current = path[-1] if isinstance(path, list) and path else "-"
+        chosen = str(data.get("chosen_neighbor") or "-")
+
+        rows = [
+            ("Hiện tại", f"{current}   h={self._cost_text(data.get('current_heuristic'))}   cost={self._cost_text(data.get('path_cost'))}"),
+            ("Đường", path_text),
+            ("Ứng viên", f"{chosen}   {self._decision_text(data)}"),
+        ]
+        for label, value in rows:
+            row_h = 18 if label != "Đường" else 24
+            row_rect = pygame.Rect(rect.x + 14, y, rect.width - 28, row_h)
+            pygame.draw.rect(surface, (7, 17, 31), row_rect, border_radius=5)
+            pygame.draw.rect(surface, (30, 55, 80), row_rect, 1, border_radius=5)
+            draw_text_fit(surface, label + ":", pygame.Rect(row_rect.x + 8, row_rect.y, 76, row_rect.height), COLOR_TEXT_PRIMARY, size=7, bold=True)
+            if label == "Đường":
+                self._draw_wrapped_text(
+                    surface,
+                    value,
+                    pygame.Rect(row_rect.x + 86, row_rect.y + 2, row_rect.width - 94, row_rect.height - 4),
+                    COLOR_TEXT_PRIMARY,
+                    size=7,
+                )
+            else:
+                color = COLOR_TEXT_SUCCESS if label == "Ứng viên" and data.get("accepted") else COLOR_TEXT_PRIMARY
+                draw_text_fit(surface, value, pygame.Rect(row_rect.x + 86, row_rect.y, row_rect.width - 94, row_rect.height), color, size=7, bold=label == "Ứng viên")
+            y += row_h + 4
+
+        draw_text_fit(surface, "h(láng giềng):", pygame.Rect(rect.x + 14, y, rect.width - 28, 16), COLOR_TEXT_PRIMARY, size=8, bold=True)
+        y += 16
+        for row in (data.get("neighbor_scores") or [])[:3]:
             if not isinstance(row, dict):
                 continue
             node = str(row.get("node", "-"))
             h_value = self._cost_text(row.get("heuristic"))
+            edge_cost = self._cost_text(row.get("edge_cost"))
             color = COLOR_TEXT_SUCCESS if node == data.get("chosen_neighbor") else COLOR_TEXT_PRIMARY
-            draw_text_fit(surface, f"{node}: h={h_value}", pygame.Rect(rect.x + 18, y, rect.width - 36, 17), color, size=8, bold=node == data.get("chosen_neighbor"))
-            y += 18
+            marker = ">" if node == data.get("chosen_neighbor") else " "
+            draw_text_fit(
+                surface,
+                f"{marker} {node}: h={h_value}, cạnh={edge_cost}",
+                pygame.Rect(rect.x + 18, y, rect.width - 36, 17),
+                color,
+                size=7,
+                bold=node == data.get("chosen_neighbor"),
+            )
+            y += 15
         reason = str(data.get("reason") or "")
         if reason and y + 18 < rect.bottom:
             color = COLOR_TEXT_ERROR if "local" in reason or "stopped" in reason else COLOR_TEXT_SECONDARY
-            draw_text_fit(surface, f"Lý do: {reason}", pygame.Rect(rect.x + 14, rect.bottom - 24, rect.width - 28, 18), color, size=8, bold=True)
+            draw_text_fit(surface, f"Kết luận: {self._reason_text(reason)}", pygame.Rect(rect.x + 14, rect.bottom - 24, rect.width - 28, 18), color, size=8, bold=True)
 
     def _draw_csp_result(
         self,
@@ -494,6 +818,33 @@ class StatsView:
             return "-"
         best = min(dict_rows, key=lambda row: float(row.get("heuristic", float("inf"))))
         return f"{best.get('node')} h={self._cost_text(best.get('heuristic'))}"
+
+    def _decision_text(self, data: dict) -> str:
+        accepted = data.get("accepted")
+        reason = str(data.get("reason") or "")
+        if accepted is True:
+            return "-> chọn"
+        if accepted is False and data.get("chosen_neighbor"):
+            return "-> đang xét"
+        if reason == "goal":
+            return "đã tới đích"
+        return ""
+
+    def _reason_text(self, reason: str) -> str:
+        labels = {
+            "goal": "Đã tới node mục tiêu.",
+            "better": "Ứng viên có h thấp hơn node hiện tại.",
+            "not-better": "Ứng viên không cải thiện h.",
+            "first-lower-heuristic": "Chọn láng giềng đầu tiên có h thấp hơn.",
+            "lowest-neighbor-heuristic": "Chọn láng giềng có h thấp nhất.",
+            "scan-all-neighbors": "Đã quét toàn bộ láng giềng để tìm h tốt nhất.",
+            "local-optimum": "Không còn láng giềng nào có h thấp hơn.",
+            "max-steps": "Dừng vì đạt giới hạn bước.",
+            "lower-heuristic": "Chấp nhận vì h giảm.",
+            "probabilistic-worse": "Chấp nhận bước xấu theo xác suất nhiệt độ.",
+            "stopped-before-goal": "Dừng trước khi tới goal.",
+        }
+        return labels.get(reason, reason or "-")
 
     def _zone_short_list(self, values: object) -> str:
         if not isinstance(values, list) or not values:

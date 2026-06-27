@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import Iterator
 
-from algorithms.complex_environment.belief_unobservable import _search_plan
+from algorithms.complex_environment.belief_unobservable import _search_plan_generator
 from algorithms.complex_environment.common import (
     belief_is_safe,
     initial_belief,
@@ -28,28 +28,37 @@ def solve_steps(
     observed = observation_region(graph, ids_node, radius)
     hidden_nodes = [node.id for node in graph.get_all_nodes() if node.id not in observed]
     belief0 = initial_belief(graph, metadata)
-    step_idx = 0
+    
+    state = {
+        "step_idx": 0,
+        "algorithm": "Belief Partial",
+        "hidden_nodes": hidden_nodes,
+        "observed_nodes": sorted(observed),
+        "plan": [],
+        "expanded": 0,
+        "blocked": []
+    }
 
     yield StepEvent(
-        step_index=step_idx,
+        step_index=state["step_idx"],
         algorithm="Belief Partial",
         event_type="info",
-        message=f"[Step {step_idx:03d}] Partial: initial belief={sorted(belief0)}, observed={sorted(observed)}.",
+        message=f"[Step {state['step_idx']:03d}] Partial: initial belief={sorted(belief0)}, observed={sorted(observed)}.",
         data={"belief": sorted(belief0), "observed_nodes": sorted(observed), "hidden_nodes": hidden_nodes},
     )
-    step_idx += 1
+    state["step_idx"] += 1
 
     possible = possible_after_one_hacker_move(graph, belief0)
     belief1 = frozenset(pos for pos in possible if pos in observed or any(n in observed for n in graph.neighbors(pos, ignore_blocked=True)))
     if not belief1:
         belief1 = belief0
     yield StepEvent(
-        step_index=step_idx,
+        step_index=state["step_idx"],
         algorithm="Belief Partial",
         event_type="update",
         current_node=ids_node,
         message=(
-            f"[Step {step_idx:03d}] Partial: observation near {ids_node}; "
+            f"[Step {state['step_idx']:03d}] Partial: observation near {ids_node}; "
             f"belief {sorted(belief0)} -> {sorted(belief1)}."
         ),
         data={
@@ -60,47 +69,30 @@ def solve_steps(
             "observation": f"suspicious activity near {ids_node}",
         },
     )
-    step_idx += 1
+    state["step_idx"] += 1
 
-    plan, expanded = _search_plan(graph, belief1, goals, max_depth=3)
-    blocked: list[str] = []
-    for action in plan:
-        blocked.append(action.target)
-        yield StepEvent(
-            step_index=step_idx,
-            algorithm="Belief Partial",
-            event_type="update",
-            current_node=action.target,
-            frontier=blocked,
-            message=f"[Step {step_idx:03d}] Partial: apply {action.description}.",
-            nodes_expanded=expanded,
-            nodes_generated=len(plan),
-            total_cost=float(len(blocked)),
-            data={
-                "belief": sorted(belief1),
-                "observed_nodes": sorted(observed),
-                "hidden_nodes": hidden_nodes,
-                "blocked_nodes": list(blocked),
-                "plan": [item.description for item in plan],
-            },
-        )
-        step_idx += 1
+    yield from _search_plan_generator(graph, belief1, goals, state)
 
-    success = bool(plan) and belief_is_safe(graph, belief1, goals, blocked)
+    plan = state["plan"]
+    expanded = state["expanded"]
+    blocked = frozenset(state["blocked"])
+    final_belief = state.get("final_belief", list(belief1))
+    success = bool(plan) and (not final_belief or belief_is_safe(graph, frozenset(final_belief), goals, blocked))
+    
     yield StepEvent(
-        step_index=step_idx,
+        step_index=state["step_idx"],
         algorithm="Belief Partial",
         event_type="found" if success else "failure",
-        frontier=blocked,
+        frontier=list(blocked),
         message=(
-            f"[Step {step_idx:03d}] Partial: "
+            f"[Step {state['step_idx']:03d}] Partial: "
             f"{'plan found' if success else 'no plan found'} after observation."
         ),
         nodes_expanded=expanded,
         nodes_generated=len(plan),
         total_cost=float(len(blocked)),
         data={
-            "belief": sorted(belief1),
+            "belief": sorted(final_belief) if success else sorted(belief1),
             "observed_nodes": sorted(observed),
             "hidden_nodes": hidden_nodes,
             "blocked_nodes": list(blocked),

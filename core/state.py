@@ -97,6 +97,14 @@ class AppState:
     # Minimax/Alpha-Beta/Expectimax params
     game_depth: int = 3
 
+    # Adversarial tab state
+    adversarial_hacker_action: str = "move"
+    adversarial_target_node: Optional[str] = None
+    adversarial_teacher_view: bool = False
+    adversarial_turn: str = "hacker"
+    adversarial_game_state: Optional[Any] = None
+    adversarial_turn_index: int = 0
+
     # UI state
     hovered_node: Optional[str] = None
     selected_node: Optional[str] = None  # Node đang click xem metadata

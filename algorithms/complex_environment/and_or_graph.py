@@ -4,24 +4,17 @@ from __future__ import annotations
 import time
 from typing import Any, Iterator
 
-from algorithms.complex_environment.common import belief_is_safe, initial_belief
+from algorithms.complex_environment.common import (
+    belief_is_safe,
+    initial_belief,
+    possible_after_one_hacker_move,
+)
 from core.graph import NetworkGraph
-from core.models import Action, AlgorithmMetrics, AlgorithmResult, StepEvent
+from core.models import AlgorithmMetrics, AlgorithmResult, BeliefState, StepEvent
 
 
-def _outcomes(action: Action, blocked: frozenset[str]) -> list[tuple[str, frozenset[str]]]:
-    if action.target == "Firewall":
-        return [
-            ("lockdown succeeds", blocked | frozenset(["Firewall"])),
-            ("manual fallback blocks Router and Switch", blocked | frozenset(["Router", "Switch"])),
-        ]
-    return [
-        ("success", blocked | frozenset([action.target])),
-        ("failure", blocked),
-    ]
-
-
-def _actions(blocked: frozenset[str], tried: frozenset[str]) -> list[Action]:
+def _actions(blocked: frozenset[str], tried: frozenset[str]) -> list[Any]:
+    from core.models import Action
     candidates = ["Router", "Switch", "Firewall"]
     return [
         Action("defender", "uncertain_block", node_id, f"Try isolate {node_id}")
@@ -30,34 +23,82 @@ def _actions(blocked: frozenset[str], tried: frozenset[str]) -> list[Action]:
     ]
 
 
-def _and_or_search(
+def _outcomes(action: Any, blocked: frozenset[str]) -> list[tuple[str, frozenset[str]]]:
+    if action.target == "Firewall":
+        return [
+            ("success", blocked | frozenset(["Firewall"])),
+            ("fallback", blocked | frozenset(["Router", "Switch"])),
+        ]
+    return [
+        ("success", blocked | frozenset([action.target])),
+        ("failure", blocked),
+    ]
+
+
+def _and_or_search_generator(
     graph: NetworkGraph,
     belief: frozenset[str],
     goals: list[str],
     blocked: frozenset[str],
     tried: frozenset[str],
-    counters: dict[str, int],
-) -> dict[str, Any] | None:
-    counters["visited"] += 1
-    if belief_is_safe(graph, belief, goals, blocked):
-        return {"type": "goal", "blocked_nodes": sorted(blocked)}
+    state: dict[str, Any],
+) -> Iterator[StepEvent]:
+    state["counters"]["visited"] += 1
+    
+    yield StepEvent(
+        step_index=state["step_idx"],
+        algorithm="AND-OR",
+        event_type="update",
+        current_node=None,
+        message=f"[Step {state['step_idx']:03d}] AND-OR: thử nghiệm trạng thái chặn={list(blocked)}, belief={list(belief)}",
+        nodes_expanded=state["counters"]["visited"],
+        nodes_generated=state["counters"]["visited"],
+        data={
+            "belief": sorted(belief),
+            "plan_tree": None,
+            "plan_lines": [f"Thử nghiệm chặn={list(blocked)}"]
+        },
+    )
+    state["step_idx"] += 1
+
+    if not belief or belief_is_safe(graph, belief, goals, blocked):
+        return {"type": "goal", "blocked_nodes": sorted(blocked), "final_belief": sorted(belief)}
 
     for action in _actions(blocked, tried):
         branches: dict[str, Any] = {}
         ok = True
+        
+        yield StepEvent(
+            step_index=state["step_idx"],
+            algorithm="AND-OR",
+            event_type="update",
+            current_node=action.target,
+            message=f"[Step {state['step_idx']:03d}] AND-OR: xem xét nhánh {action.description}",
+            nodes_expanded=state["counters"]["visited"],
+            nodes_generated=state["counters"]["visited"],
+            data={
+                "belief": sorted(belief),
+                "plan_tree": None,
+                "plan_lines": [f"Xem xét {action.description}"]
+            },
+        )
+        state["step_idx"] += 1
+
         for outcome_name, next_blocked in _outcomes(action, blocked):
-            subtree = _and_or_search(
+            next_belief = frozenset(p for p in possible_after_one_hacker_move(graph, belief) if p not in next_blocked)
+            subtree = yield from _and_or_search_generator(
                 graph,
-                belief,
+                next_belief,
                 goals,
                 next_blocked,
                 tried | frozenset([action.target]),
-                counters,
+                state,
             )
             if subtree is None:
                 ok = False
                 break
             branches[outcome_name] = subtree
+            
         if ok:
             return {
                 "type": "action",
@@ -65,6 +106,7 @@ def _and_or_search(
                 "target": action.target,
                 "branches": branches,
                 "blocked_nodes": sorted(blocked),
+                "final_belief": sorted(belief),
             }
     return None
 
@@ -86,44 +128,34 @@ def solve_steps(
 ) -> Iterator[StepEvent]:
     """Yield AND-OR conditional-plan steps."""
     belief = initial_belief(graph, metadata)
-    counters = {"visited": 0}
-    step_idx = 0
+    state = {
+        "step_idx": 0,
+        "counters": {"visited": 0}
+    }
+    
     yield StepEvent(
-        step_index=step_idx,
+        step_index=state["step_idx"],
         algorithm="AND-OR",
         event_type="info",
-        message=f"[Step {step_idx:03d}] AND-OR: belief={sorted(belief)}.",
+        message=f"[Step {state['step_idx']:03d}] AND-OR: belief={sorted(belief)}.",
         data={"belief": sorted(belief), "plan_tree": None},
     )
-    step_idx += 1
+    state["step_idx"] += 1
 
-    plan = _and_or_search(graph, belief, goals, frozenset(), frozenset(), counters)
-    if plan:
-        for line in _plan_lines(plan)[:6]:
-            yield StepEvent(
-                step_index=step_idx,
-                algorithm="AND-OR",
-                event_type="update",
-                current_node=plan.get("target"),
-                message=f"[Step {step_idx:03d}] AND-OR: {line}",
-                nodes_expanded=counters["visited"],
-                nodes_generated=counters["visited"],
-                data={"belief": sorted(belief), "plan_tree": plan, "plan_lines": _plan_lines(plan)},
-            )
-            step_idx += 1
+    plan = yield from _and_or_search_generator(graph, belief, goals, frozenset(), frozenset(), state)
 
     yield StepEvent(
-        step_index=step_idx,
+        step_index=state["step_idx"],
         algorithm="AND-OR",
         event_type="found" if plan else "failure",
         current_node=plan.get("target") if plan else None,
         message=(
-            f"[Step {step_idx:03d}] AND-OR: "
+            f"[Step {state['step_idx']:03d}] AND-OR: "
             f"{'conditional plan found' if plan else 'no conditional plan'}."
         ),
-        nodes_expanded=counters["visited"],
-        nodes_generated=counters["visited"],
-        total_cost=float(counters["visited"]),
+        nodes_expanded=state["counters"]["visited"],
+        nodes_generated=state["counters"]["visited"],
+        total_cost=float(state["counters"]["visited"]),
         data={
             "belief": sorted(belief),
             "plan_tree": plan,

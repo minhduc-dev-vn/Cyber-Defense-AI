@@ -1,4 +1,4 @@
-"""Alpha-Beta pruning for the adversarial game."""
+"""Alpha-Beta pruning for the adversarial simulator."""
 from __future__ import annotations
 
 import time
@@ -7,10 +7,11 @@ from typing import Iterator
 
 from algorithms.adversarial.common import (
     apply_action,
-    evaluate,
+    defender_actions,
+    hacker_actions,
+    hacker_value,
     initial_state,
     is_terminal,
-    legal_actions,
 )
 from core.graph import NetworkGraph
 from core.models import Action, AlgorithmMetrics, AlgorithmResult, GameState, StepEvent
@@ -27,11 +28,11 @@ def _alpha_beta(
 ) -> tuple[float, Action | None]:
     counters["visited"] += 1
     if depth == 0 or is_terminal(graph, state, goals):
-        return evaluate(graph, state, goals), None
+        return hacker_value(graph, state, goals), None
 
-    actions = legal_actions(graph, state, goals)
+    actions = hacker_actions(graph, state, goals) if state.turn == "hacker" else defender_actions(graph, state, goals)
     if not actions:
-        return evaluate(graph, state, goals), None
+        return hacker_value(graph, state, goals), None
 
     if state.turn == "hacker":
         best_value = -inf
@@ -71,12 +72,14 @@ def solve_steps(
     state = initial_state(graph, start)
     counters = {"visited": 0, "pruned": 0}
     step_idx = 0
+    hacker_choices = hacker_actions(graph, state, goals)
+    defender_choices = defender_actions(graph, state, goals)
     yield StepEvent(
         step_index=step_idx,
         algorithm="Alpha-Beta",
         event_type="info",
         current_node=state.hacker_position,
-        message=f"[Step {step_idx:03d}] Alpha-Beta: start at {start}, depth={depth}.",
+        message=f"[Step {step_idx:03d}] Alpha-Beta adversarial sim start at {start}, depth={depth}.",
         data={"turn": state.turn, "depth": depth, "alpha": -inf, "beta": inf, "state": state},
     )
     step_idx += 1
@@ -85,15 +88,20 @@ def solve_steps(
     best_action: Action | None = None
     alpha = -inf
     beta = inf
-    for action in legal_actions(graph, state, goals):
+    for action in hacker_choices:
         before_visited = counters["visited"]
         before_pruned = counters["pruned"]
-        child = apply_action(graph, state, action)
+        child = apply_action(graph, state, action, next_turn="defender")
         value, _ = _alpha_beta(graph, child, goals, depth - 1, alpha, beta, counters)
         if value > best_value:
             best_value = value
             best_action = action
         alpha = max(alpha, best_value)
+        defender_best = None
+        defender_state = child
+        if best_action is not None:
+            defender_choices_local = defender_actions(graph, defender_state, goals)
+            defender_best = defender_choices_local[0] if defender_choices_local else None
         yield StepEvent(
             step_index=step_idx,
             algorithm="Alpha-Beta",
@@ -101,8 +109,7 @@ def solve_steps(
             current_node=action.target,
             path=[state.hacker_position, action.target] if action.action_type == "move" else [state.hacker_position],
             message=(
-                f"[Step {step_idx:03d}] Alpha-Beta: action {action.description}; "
-                f"value={value:.2f}; alpha={alpha:.2f}; beta={beta:.2f}; "
+                f"[Step {step_idx:03d}] Hacker {action.description}; score={value:.2f}; alpha={alpha:.2f}; beta={beta:.2f}; "
                 f"pruned+={counters['pruned'] - before_pruned}."
             ),
             nodes_expanded=counters["visited"],
@@ -112,6 +119,7 @@ def solve_steps(
                 "turn": state.turn,
                 "depth": depth,
                 "action": action,
+                "defender_action": defender_best,
                 "evaluation": value,
                 "alpha": alpha,
                 "beta": beta,
@@ -123,7 +131,7 @@ def solve_steps(
         step_idx += 1
 
     if best_action is None:
-        best_value = evaluate(graph, state, goals)
+        best_value = hacker_value(graph, state, goals)
     yield StepEvent(
         step_index=step_idx,
         algorithm="Alpha-Beta",
@@ -131,9 +139,8 @@ def solve_steps(
         current_node=best_action.target if best_action else state.hacker_position,
         path=[state.hacker_position, best_action.target] if best_action and best_action.action_type == "move" else [state.hacker_position],
         message=(
-            f"[Step {step_idx:03d}] Alpha-Beta: choose "
-            f"{best_action.description if best_action else 'no-op'}; value={best_value:.2f}; "
-            f"pruned={counters['pruned']}."
+            f"[Step {step_idx:03d}] Alpha-Beta chọn {best_action.description if best_action else 'no-op'}; "
+            f"score={best_value:.2f}; pruned={counters['pruned']}."
         ),
         nodes_expanded=counters["visited"],
         nodes_generated=counters["visited"],
