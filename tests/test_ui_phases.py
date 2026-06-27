@@ -55,6 +55,22 @@ def test_compare_group_2_runs_informed_algorithms(app):
     assert all(result.success for result in app.state.compare_results)
 
 
+def test_compare_group_3_reports_local_search_metrics(app):
+    app.state.selected_group_index = 2
+    app._load_map("defense_optimization")
+    app._on_compare()
+
+    names = [result.metrics.algorithm for result in app.state.compare_results]
+    log_text = "\n".join(entry.message for entry in app.state.run_state.log.get_all())
+
+    assert app.state.compare_mode
+    assert names == ["Simple HC", "Steepest HC", "Sim. Annealing"]
+    assert all(result.metrics.extra.get("local_search_mode") == "heuristic_path" for result in app.state.compare_results)
+    assert all("current_heuristic" in result.metrics.extra for result in app.state.compare_results)
+    assert "PathCost" in log_text
+    assert "h cuối" in log_text
+
+
 def test_group_2_step_builds_selected_algorithm(app):
     app.state.selected_group_index = 1
     app.state.selected_algo_index = 1

@@ -48,8 +48,24 @@ def solve_steps(
     assignment = _initial_assignment(graph, rng, domains)
     step_idx = 0
 
-    def make_step(event_type: str, message: str, current: str | None = None) -> StepEvent:
+    def make_step(
+        event_type: str,
+        message: str,
+        current: str | None = None,
+        extra: dict | None = None,
+    ) -> StepEvent:
         conflicts = final_violations(graph, assignment)
+        data = {
+            "assignments": dict(assignment),
+            "domains": {k: list(v) for k, v in domains.items()},
+            "current_domain": list(domains.get(current, [])) if current else [],
+            "conflicts": conflicts,
+            "seed": seed,
+            "max_steps": max_steps,
+            "assigned_count": len(assignment),
+        }
+        if extra:
+            data.update(extra)
         return StepEvent(
             step_index=step_idx,
             algorithm="Min-Conflicts",
@@ -62,13 +78,7 @@ def solve_steps(
             nodes_generated=step_idx,
             max_frontier_size=len(_conflicted_variables(graph, assignment)),
             total_cost=float(len(conflicts)),
-            data={
-                "assignments": dict(assignment),
-                "domains": {k: list(v) for k, v in domains.items()},
-                "conflicts": conflicts,
-                "seed": seed,
-                "max_steps": max_steps,
-            },
+            data=data,
         )
 
     yield make_step(
@@ -118,6 +128,13 @@ def solve_steps(
                 f"{old_value} -> {new_value}; conflicts={best_conflicts}."
             ),
             current=var,
+            extra={
+                "old_value": old_value,
+                "new_value": new_value,
+                "attempted_value": new_value,
+                "best_conflicts": best_conflicts,
+                "conflicted_variables": conflicted,
+            },
         )
         step_idx += 1
 

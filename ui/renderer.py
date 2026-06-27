@@ -96,19 +96,41 @@ class GraphRenderer:
         current: Optional[str] = step.current_node if step else None
         final_edges: Set[tuple[str, str]] = set()
         assignments = step.data.get("assignments", {}) if step else {}
+        domains = step.data.get("domains", {}) if step else {}
+        current_domain = step.data.get("current_domain", []) if step else []
+        attempted_value = step.data.get("attempted_value") if step else None
+        removed_domains = step.data.get("removed", {}) if step else {}
+        conflicted_variables = set(step.data.get("conflicted_variables", [])) if step else set()
         defense_config = step.data.get("defense_config") if step else None
         firewall_nodes = set(getattr(defense_config, "firewall_nodes", []))
         ids_nodes = set(getattr(defense_config, "ids_nodes", []))
         upgraded_nodes = set(getattr(defense_config, "upgraded_nodes", []))
+        blocked_path_samples = step.data.get("blocked_path_samples", []) if step else []
+        open_path_samples = step.data.get("open_path_samples", []) if step else []
         virtual_blocked_nodes = set(step.data.get("blocked_nodes", [])) if step else set()
         hidden_nodes = set(step.data.get("hidden_nodes", [])) if step else set()
         teacher_view = bool(step.data.get("teacher_view", False)) if step else False
+        local_mode = step.data.get("local_search_mode") == "heuristic_path" if step else False
+        heuristic_table = step.data.get("heuristic_table", {}) if step else {}
+        chosen_neighbor = step.data.get("chosen_neighbor") if step else None
 
         # Tập edge thuộc final path
         if final_path:
             for i in range(len(final_path) - 1):
                 final_edges.add((final_path[i], final_path[i + 1]))
                 final_edges.add((final_path[i + 1], final_path[i]))
+
+        csp_trial_assignments = dict(assignments) if isinstance(assignments, dict) else {}
+        if current and attempted_value and isinstance(domains, dict) and current in domains:
+            csp_trial_assignments[current] = str(attempted_value)
+        csp_conflict_edges: Set[tuple[str, str]] = set()
+        if csp_trial_assignments:
+            for edge in self.graph.get_all_edges():
+                left_zone = csp_trial_assignments.get(edge.source)
+                right_zone = csp_trial_assignments.get(edge.target)
+                if left_zone and right_zone and left_zone == right_zone:
+                    csp_conflict_edges.add((edge.source, edge.target))
+                    csp_conflict_edges.add((edge.target, edge.source))
 
         ox, oy = offset
 
@@ -126,6 +148,9 @@ class GraphRenderer:
             if edge.blocked:
                 color = COLOR_EDGE_BLOCKED
                 width = EDGE_WIDTH
+            elif (edge.source, edge.target) in csp_conflict_edges:
+                color = (255, 82, 82)
+                width = EDGE_WIDTH + 2
             elif (edge.source, edge.target) in final_edges or (edge.target, edge.source) in final_edges:
                 color = COLOR_EDGE_FINAL
                 width = EDGE_WIDTH + 2
@@ -133,8 +158,19 @@ class GraphRenderer:
                 color = COLOR_EDGE_DEFAULT
                 width = EDGE_WIDTH
 
+            mid_x, mid_y = (sx + dx) // 2, (sy + dy) // 2
             pygame.draw.line(self.surface, (2, 8, 15), (sx, sy), (dx, dy), width + 4)
-            if width > EDGE_WIDTH:
+            if (edge.source, edge.target) in csp_conflict_edges:
+                self._draw_dashed_line(self.surface, (255, 82, 82), (sx, sy), (dx, dy), width + 1, dash_len=10, gap_len=7)
+                self._draw_dashed_line(self.surface, (255, 195, 195), (sx, sy), (dx, dy), 1, dash_len=10, gap_len=7)
+                err_font = get_font(8, bold=True)
+                err = err_font.render("LOI", True, (255, 230, 230))
+                err_rect = err.get_rect(center=(mid_x, mid_y + 12))
+                bg = err_rect.inflate(10, 5)
+                pygame.draw.rect(self.surface, (95, 14, 22), bg, border_radius=5)
+                pygame.draw.rect(self.surface, (255, 92, 80), bg, 1, border_radius=5)
+                self.surface.blit(err, err_rect)
+            elif width > EDGE_WIDTH:
                 pygame.draw.line(self.surface, color, (sx, sy), (dx, dy), width + 3)
                 pygame.draw.line(self.surface, (255, 206, 122), (sx, sy), (dx, dy), 2)
             else:
@@ -142,7 +178,6 @@ class GraphRenderer:
                 pygame.draw.line(self.surface, color, (sx, sy), (dx, dy), width)
 
             # Label chi phí cạnh
-            mid_x, mid_y = (sx + dx) // 2, (sy + dy) // 2
             cost_label = f"{edge.base_cost:.0f}"
             font_small = get_font(12, bold=True)
             cost_surf = font_small.render(cost_label, True, COLOR_TEXT_PRIMARY)
@@ -150,6 +185,12 @@ class GraphRenderer:
             center = (mid_x + 3, mid_y - 8)
             self.surface.blit(shadow_surf, shadow_surf.get_rect(center=(center[0] + 1, center[1] + 1)))
             self.surface.blit(cost_surf, cost_surf.get_rect(center=center))
+
+        if defense_config:
+            for path in open_path_samples[:1]:
+                self._draw_path_overlay(path, (72, 214, 112), width=3, dashed=False)
+            for path in blocked_path_samples[:2]:
+                self._draw_path_overlay(path, (255, 92, 80), width=4, dashed=True)
 
         # ── Vẽ nodes ────────────────────────────────────────────────────────
         nodes = self.graph.get_all_nodes()
@@ -164,6 +205,8 @@ class GraphRenderer:
                 state = "blocked"
             elif node.id == current:
                 state = "current"
+            elif local_mode and node.id == chosen_neighbor:
+                state = "frontier"
             elif node.id in final_path and final_path:
                 state = "final"
             elif node.id in explored:
@@ -184,12 +227,16 @@ class GraphRenderer:
                 base_color = COLOR_NODE_SERVER
             if node.id in assignments:
                 base_color = CSP_ZONE_COLORS.get(assignments[node.id], base_color)
+            elif node.id == current and attempted_value and isinstance(domains, dict) and node.id in domains:
+                base_color = CSP_ZONE_COLORS.get(str(attempted_value), base_color)
 
             # Vẽ viền (highlight node đang chọn hoặc hover)
             if node.id == selected_node:
                 pygame.draw.circle(self.surface, (255, 255, 255), (nx, ny), r + 5, 3)
             elif node.id == hovered_node:
                 pygame.draw.circle(self.surface, (200, 200, 200), (nx, ny), r + 3, 2)
+            elif node.id in conflicted_variables:
+                pygame.draw.circle(self.surface, (255, 82, 82), (nx, ny), r + 11, 3)
 
             # Vẽ node chính
             shadow = pygame.Surface((r * 3, r * 3), pygame.SRCALPHA)
@@ -235,10 +282,13 @@ class GraphRenderer:
 
             if node.id in firewall_nodes:
                 pygame.draw.circle(self.surface, (255, 145, 45), (nx, ny), r + 5, 3)
+                self._draw_defense_badge(nx, ny, r, "FW", (255, 145, 45), "top_left")
             if node.id in ids_nodes:
                 pygame.draw.circle(self.surface, (255, 220, 70), (nx, ny), r + 9, 2)
+                self._draw_defense_badge(nx, ny, r, "IDS", (255, 220, 70), "top_right")
             if node.id in upgraded_nodes:
                 pygame.draw.circle(self.surface, (80, 220, 220), (nx, ny), r - 6, 3)
+                self._draw_defense_badge(nx, ny, r, "UP", (80, 220, 220), "bottom_right")
 
             # Icon đặc biệt cho từng loại node
             self._draw_node_icon(node.kind, nx, ny, r, ring_color)
@@ -256,11 +306,34 @@ class GraphRenderer:
                 pygame.draw.line(self.surface, (200, 50, 50), (nx + 10, ny - 10), (nx - 10, ny + 10), 2)
 
             if node.id in assignments:
-                zone_font = get_font(9)
                 zone = str(assignments[node.id]).replace(" Zone", "")
-                zone_surf = zone_font.render(zone[:10], True, COLOR_TEXT_SECONDARY)
-                zw, _ = zone_surf.get_size()
-                self.surface.blit(zone_surf, (nx - zw // 2, ny + r + 16))
+                self._draw_zone_badge(nx, ny, r, zone, base_color, below=ny <= label_mid_y)
+            elif node.id == current and attempted_value and isinstance(domains, dict) and node.id in domains:
+                zone = str(attempted_value).replace(" Zone", "")
+                self._draw_zone_badge(nx, ny, r, zone, base_color, below=ny <= label_mid_y)
+
+            if local_mode and isinstance(heuristic_table, dict) and node.id in heuristic_table:
+                self._draw_heuristic_badge(nx, ny, r, heuristic_table.get(node.id), below=ny > label_mid_y)
+
+            if node.id == current and current_domain:
+                self._draw_csp_domain_chips(
+                    nx,
+                    ny,
+                    r,
+                    list(current_domain),
+                    str(attempted_value) if attempted_value else None,
+                    below=ny <= label_mid_y,
+                )
+            elif isinstance(removed_domains, dict) and node.id in removed_domains:
+                self._draw_csp_domain_chips(
+                    nx,
+                    ny,
+                    r,
+                    list(removed_domains.get(node.id, [])),
+                    None,
+                    below=ny <= label_mid_y,
+                    pruned=True,
+                )
 
             if node.id in hidden_nodes and not teacher_view:
                 fog = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
@@ -270,6 +343,177 @@ class GraphRenderer:
                 q_surf = q_font.render("?", True, (230, 235, 250))
                 qw, qh = q_surf.get_size()
                 self.surface.blit(q_surf, (nx - qw // 2, ny - qh // 2))
+
+    def _draw_path_overlay(
+        self,
+        path: list[str],
+        color: tuple[int, int, int],
+        *,
+        width: int = 3,
+        dashed: bool = False,
+    ) -> None:
+        if len(path) < 2:
+            return
+        points: list[tuple[int, int]] = []
+        for node_id in path:
+            node = self.graph.get_node(str(node_id))
+            if not node:
+                return
+            points.append(self._node_pos(node))
+        glow = pygame.Surface(self.surface.get_size(), pygame.SRCALPHA)
+        for start, end in zip(points, points[1:]):
+            if dashed:
+                self._draw_dashed_line(glow, (*color, 120), start, end, width + 5)
+                self._draw_dashed_line(self.surface, color, start, end, width)
+            else:
+                pygame.draw.line(glow, (*color, 86), start, end, width + 6)
+                pygame.draw.line(self.surface, color, start, end, width)
+        self.surface.blit(glow, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
+    def _draw_dashed_line(
+        self,
+        surface: pygame.Surface,
+        color: tuple[int, ...],
+        start: tuple[int, int],
+        end: tuple[int, int],
+        width: int,
+        dash_len: int = 14,
+        gap_len: int = 8,
+    ) -> None:
+        sx, sy = start
+        ex, ey = end
+        dx, dy = ex - sx, ey - sy
+        length = math.hypot(dx, dy)
+        if length <= 0:
+            return
+        ux, uy = dx / length, dy / length
+        pos = 0.0
+        while pos < length:
+            seg_end = min(length, pos + dash_len)
+            p1 = (int(sx + ux * pos), int(sy + uy * pos))
+            p2 = (int(sx + ux * seg_end), int(sy + uy * seg_end))
+            pygame.draw.line(surface, color, p1, p2, width)
+            pos += dash_len + gap_len
+
+    def _draw_defense_badge(
+        self,
+        cx: int,
+        cy: int,
+        r: int,
+        text: str,
+        color: tuple[int, int, int],
+        corner: str,
+    ) -> None:
+        font = get_font(8, bold=True)
+        label = font.render(text, True, (5, 14, 25))
+        badge_w = max(24, label.get_width() + 10)
+        badge_h = 16
+        dx = r - 7
+        dy = r - 7
+        if corner == "top_left":
+            center = (cx - dx, cy - dy)
+        elif corner == "top_right":
+            center = (cx + dx, cy - dy)
+        elif corner == "bottom_left":
+            center = (cx - dx, cy + dy)
+        else:
+            center = (cx + dx, cy + dy)
+        rect = pygame.Rect(0, 0, badge_w, badge_h)
+        rect.center = center
+        glow = pygame.Surface((badge_w + 10, badge_h + 10), pygame.SRCALPHA)
+        pygame.draw.rect(glow, (*color, 70), glow.get_rect(), border_radius=8)
+        self.surface.blit(glow, (rect.x - 5, rect.y - 5))
+        pygame.draw.rect(self.surface, color, rect, border_radius=6)
+        pygame.draw.rect(self.surface, (245, 252, 255), rect, 1, border_radius=6)
+        self.surface.blit(label, label.get_rect(center=rect.center))
+
+    def _draw_zone_badge(
+        self,
+        cx: int,
+        cy: int,
+        r: int,
+        zone: str,
+        color: tuple[int, int, int],
+        *,
+        below: bool,
+    ) -> None:
+        label_text = {
+            "User": "USER",
+            "DMZ": "DMZ",
+            "Server": "SERVER",
+            "Quarantine": "QUAR",
+        }.get(zone, zone[:6].upper())
+        font = get_font(7, bold=True)
+        label = font.render(label_text, True, (235, 248, 255))
+        badge_w = max(32, label.get_width() + 10)
+        badge_h = 15
+        y = cy + r + 22 if below else cy - r - badge_h - 22
+        rect = pygame.Rect(cx - badge_w // 2, y, badge_w, badge_h)
+        pygame.draw.rect(self.surface, (4, 13, 24), rect, border_radius=5)
+        pygame.draw.rect(self.surface, color, rect, 2, border_radius=5)
+        self.surface.blit(label, label.get_rect(center=rect.center))
+
+    def _draw_heuristic_badge(self, cx: int, cy: int, r: int, value: object, *, below: bool) -> None:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            text = "h=?"
+        else:
+            text_value = "inf" if numeric == float("inf") else (str(int(numeric)) if numeric.is_integer() else f"{numeric:.1f}")
+            text = f"h={text_value}"
+        font = get_font(8, bold=True)
+        label = font.render(text, True, (235, 248, 255))
+        badge_w = max(34, label.get_width() + 10)
+        badge_h = 16
+        y = cy + r + 24 if below else cy - r - badge_h - 24
+        rect = pygame.Rect(cx - badge_w // 2, y, badge_w, badge_h)
+        pygame.draw.rect(self.surface, (4, 13, 24), rect, border_radius=5)
+        pygame.draw.rect(self.surface, (116, 195, 255), rect, 1, border_radius=5)
+        self.surface.blit(label, label.get_rect(center=rect.center))
+
+    def _draw_csp_domain_chips(
+        self,
+        cx: int,
+        cy: int,
+        r: int,
+        domain: list[str],
+        attempted: Optional[str],
+        *,
+        below: bool,
+        pruned: bool = False,
+    ) -> None:
+        if not domain:
+            return
+        labels = {
+            "User Zone": "U",
+            "DMZ": "D",
+            "Server Zone": "S",
+            "Quarantine Zone": "Q",
+        }
+        chips = [(labels.get(zone, zone[:1].upper()), zone) for zone in domain[:4]]
+        chip_w = 21
+        chip_h = 18
+        gap = 4
+        total_w = len(chips) * chip_w + max(0, len(chips) - 1) * gap
+        y = cy + r + 42 if below else cy - r - chip_h - 42
+        panel = pygame.Rect(cx - total_w // 2 - 8, y - 5, total_w + 16, chip_h + 10)
+        pygame.draw.rect(self.surface, (3, 11, 21), panel, border_radius=7)
+        pygame.draw.rect(self.surface, (34, 82, 126), panel, 1, border_radius=7)
+        font = get_font(8, bold=True)
+        for idx, (label_text, zone) in enumerate(chips):
+            x = cx - total_w // 2 + idx * (chip_w + gap)
+            rect = pygame.Rect(x, y, chip_w, chip_h)
+            zone_color = CSP_ZONE_COLORS.get(zone, (120, 140, 160))
+            is_attempted = attempted == zone
+            fill = zone_color if is_attempted and not pruned else (7, 17, 31)
+            border = (255, 240, 135) if is_attempted else zone_color
+            text_color = (5, 14, 25) if is_attempted and not pruned else (235, 248, 255)
+            pygame.draw.rect(self.surface, fill, rect, border_radius=5)
+            pygame.draw.rect(self.surface, border, rect, 2 if is_attempted else 1, border_radius=5)
+            label = font.render(label_text, True, text_color)
+            self.surface.blit(label, label.get_rect(center=rect.center))
+            if pruned:
+                pygame.draw.line(self.surface, (255, 92, 80), (rect.x + 4, rect.bottom - 4), (rect.right - 4, rect.y + 4), 2)
 
     def _draw_node_shell(
         self,

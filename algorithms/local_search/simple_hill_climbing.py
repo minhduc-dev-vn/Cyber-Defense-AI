@@ -1,18 +1,19 @@
-"""Simple Hill Climbing for defender configuration optimization."""
+"""Simple Hill Climbing on a weighted network path."""
 from __future__ import annotations
 
 import time
 from typing import Iterator
 
 from algorithms.local_search.common import (
-    config_label,
-    defense_value,
-    initial_config,
-    neighbors,
-    score_details,
+    format_cost_value,
+    heuristic_value,
+    local_step_data,
+    neighbor_heuristics,
+    path_cost,
+    path_edges,
 )
 from core.graph import NetworkGraph
-from core.models import AlgorithmMetrics, AlgorithmResult, DefenseConfig, StepEvent
+from core.models import AlgorithmMetrics, AlgorithmResult, StepEvent
 
 
 def solve_steps(
@@ -21,70 +22,114 @@ def solve_steps(
     goals: list[str],
     max_steps: int = 80,
 ) -> Iterator[StepEvent]:
-    """Yield Simple Hill Climbing steps. DefenseValue is maximized."""
-    current = initial_config(graph, start, goals)
-    current_value = defense_value(graph, start, goals, current)
+    """Yield Simple Hill Climbing steps. h(n) is minimized."""
+    current = start
+    path = [start]
+    visited = {start}
     step_idx = 0
 
-    def make_step(event_type: str, message: str, config: DefenseConfig) -> StepEvent:
-        details = score_details(graph, start, goals, config)
+    def make_step(
+        event_type: str,
+        message: str,
+        *,
+        chosen_neighbor: str | None = None,
+        accepted: bool | None = None,
+        reason: str = "",
+    ) -> StepEvent:
+        details = local_step_data(
+            graph,
+            current,
+            goals,
+            path,
+            chosen_neighbor=chosen_neighbor,
+            accepted=accepted,
+            reason=reason,
+        )
         return StepEvent(
             step_index=step_idx,
             algorithm="Simple HC",
             event_type=event_type,
-            current_node=(config.firewall_nodes[0] if config.firewall_nodes else None),
-            frontier=config.firewall_nodes + config.ids_nodes + config.upgraded_nodes,
-            explored=config.firewall_nodes,
+            current_node=current,
+            frontier=[str(row["node"]) for row in details["neighbor_scores"]],
+            explored=list(path),
+            path=list(path),
+            highlighted_edges=path_edges(path),
             message=message,
             nodes_expanded=step_idx,
-            nodes_generated=step_idx,
-            total_cost=float(details["defense_value"]),
+            nodes_generated=len(details["neighbor_scores"]),
+            max_frontier_size=len(details["neighbor_scores"]),
+            total_cost=float(details["current_heuristic"]),
             data=details,
         )
 
+    current_h = heuristic_value(graph, current, goals)
     yield make_step(
         "info",
-        f"[Step {step_idx:03d}] Simple HC: init {config_label(current)}; value={current_value}.",
-        current,
+        f"[Step {step_idx:03d}] Simple HC: start at {current}; h={format_cost_value(current_h)}.",
     )
     step_idx += 1
 
     for _ in range(max_steps):
-        accepted = False
-        for candidate in neighbors(graph, start, goals, current):
-            candidate_value = defense_value(graph, start, goals, candidate)
+        current_h = heuristic_value(graph, current, goals)
+        if current in goals:
+            yield make_step(
+                "found",
+                f"[Step {step_idx:03d}] Simple HC: reached goal {current}; path cost={format_cost_value(path_cost(graph, path))}.",
+                accepted=True,
+                reason="goal",
+            )
+            return
+
+        moved = False
+        scores = neighbor_heuristics(graph, current, goals)
+        for row in scores:
+            neighbor = str(row["node"])
+            neighbor_h = float(row["heuristic"])
+            is_better = neighbor_h < current_h
             yield make_step(
                 "update",
                 (
-                    f"[Step {step_idx:03d}] Simple HC: check neighbor "
-                    f"value={candidate_value} vs current={current_value}."
+                    f"[Step {step_idx:03d}] Simple HC: check neighbor {neighbor}; "
+                    f"h({neighbor})={format_cost_value(neighbor_h)} vs h({current})={format_cost_value(current_h)}."
                 ),
-                candidate,
+                chosen_neighbor=neighbor,
+                accepted=False,
+                reason="better" if is_better else "not-better",
             )
             step_idx += 1
-            if candidate_value > current_value:
-                current = candidate
-                current_value = candidate_value
-                accepted = True
+
+            if is_better and neighbor not in visited:
+                current = neighbor
+                path.append(current)
+                visited.add(current)
+                moved = True
                 yield make_step(
                     "move",
-                    f"[Step {step_idx:03d}] Simple HC: accept first better state; value={current_value}.",
-                    current,
+                    f"[Step {step_idx:03d}] Simple HC: move to {current}; h={format_cost_value(neighbor_h)}.",
+                    chosen_neighbor=current,
+                    accepted=True,
+                    reason="first-lower-heuristic",
                 )
                 step_idx += 1
                 break
-        if not accepted:
+
+        if not moved:
             yield make_step(
-                "found",
-                f"[Step {step_idx:03d}] Simple HC: local optimum; value={current_value}.",
-                current,
+                "failure",
+                (
+                    f"[Step {step_idx:03d}] Simple HC: local maximum/local optimum at {current}; "
+                    f"no neighbor has h lower than {format_cost_value(current_h)}."
+                ),
+                accepted=False,
+                reason="local-optimum",
             )
             return
 
     yield make_step(
-        "found",
-        f"[Step {step_idx:03d}] Simple HC: stop at max_steps; value={current_value}.",
-        current,
+        "failure",
+        f"[Step {step_idx:03d}] Simple HC: stop at max_steps={max_steps}.",
+        accepted=False,
+        reason="max-steps",
     )
 
 
@@ -99,16 +144,18 @@ def run(
     steps = list(solve_steps(graph, start, goals, max_steps=max_steps))
     time_ms = (time.perf_counter() - start_time) * 1000.0
     last = steps[-1] if steps else None
-    config = last.data.get("defense_config") if last else None
-    value = float(last.data.get("defense_value", 0)) if last else 0.0
+    path = last.path if last else []
+    heuristic = float(last.data.get("current_heuristic", 0)) if last else 0.0
+    success = last is not None and last.event_type == "found"
     metrics = AlgorithmMetrics(
         algorithm="Simple HC",
-        success=last is not None and last.event_type == "found",
-        total_cost=value,
+        success=success,
+        path=path,
+        total_cost=float(last.data.get("path_cost", 0)) if last else 0.0,
         nodes_expanded=last.nodes_expanded if last else 0,
         nodes_generated=last.nodes_generated if last else 0,
         time_ms=time_ms,
         num_steps=len(steps),
-        extra=dict(last.data) if last else {},
+        extra={**(dict(last.data) if last else {}), "final_heuristic": heuristic},
     )
-    return AlgorithmResult(metrics=metrics, steps=steps, final_state=config)
+    return AlgorithmResult(metrics=metrics, steps=steps, final_state=path)

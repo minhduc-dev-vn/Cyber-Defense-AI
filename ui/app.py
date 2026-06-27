@@ -364,6 +364,10 @@ class App:
 
     def _format_compare_log(self, results: list[AlgorithmResult]) -> str:
         """Format compare rows for the Vietnamese UI log."""
+        if any(result.metrics.extra.get("local_search_mode") == "heuristic_path" for result in results):
+            return self._format_heuristic_local_compare_log(results)
+        if any(result.metrics.extra.get("defense_config") for result in results):
+            return self._format_local_search_compare_log(results)
         header = (
             f"{'Thuật toán':<28} | {'Đạt':>5} | {'Đường':>6} | {'Chi phí':>10} | "
             f"{'Mở rộng':>9} | {'Biên max':>9} | {'Thời gian':>10}"
@@ -379,6 +383,51 @@ class App:
                 f"{metrics.total_cost:>10.2f} | "
                 f"{metrics.nodes_expanded:>9} | "
                 f"{metrics.max_frontier_size:>9} | "
+                f"{metrics.time_ms:>8.2f}ms"
+            )
+        return "\n".join(rows)
+
+    def _format_heuristic_local_compare_log(self, results: list[AlgorithmResult]) -> str:
+        header = (
+            f"{'Thuật toán':<28} | {'Đạt':>5} | {'PathCost':>8} | {'h cuối':>8} | "
+            f"{'Bước':>5} | {'Đường đi':<36} | {'Thời gian':>10}"
+        )
+        rows = [header, "-" * len(header)]
+        for result in results:
+            metrics = result.metrics
+            extra = metrics.extra
+            path = " -> ".join(metrics.path) if metrics.path else "-"
+            rows.append(
+                f"{algo_label(metrics.algorithm):<28} | "
+                f"{'Có' if metrics.success else 'Không':>5} | "
+                f"{self._format_number(metrics.total_cost):>8} | "
+                f"{self._format_number(extra.get('final_heuristic', extra.get('current_heuristic'))):>8} | "
+                f"{metrics.num_steps:>5} | "
+                f"{path[:36]:<36} | "
+                f"{metrics.time_ms:>8.2f}ms"
+            )
+        return "\n".join(rows)
+
+    def _format_local_search_compare_log(self, results: list[AlgorithmResult]) -> str:
+        header = (
+            f"{'Thuật toán':<28} | {'Đạt':>5} | {'DefenseValue':>12} | {'RiskCost':>8} | "
+            f"{'Chặn/Mở':>8} | {'Lặp':>5} | {'Worse':>5} | {'Thời gian':>10}"
+        )
+        rows = [header, "-" * len(header)]
+        for result in results:
+            metrics = result.metrics
+            extra = metrics.extra
+            blocked = extra.get("blocked_paths", "-")
+            open_paths = extra.get("open_paths", "-")
+            worse = extra.get("accepted_worse_moves", "-")
+            rows.append(
+                f"{algo_label(metrics.algorithm):<28} | "
+                f"{'Có' if metrics.success else 'Không':>5} | "
+                f"{str(extra.get('defense_value', '-')):>12} | "
+                f"{str(extra.get('risk_cost', '-')):>8} | "
+                f"{f'{blocked}/{open_paths}':>8} | "
+                f"{metrics.num_steps:>5} | "
+                f"{str(worse):>5} | "
                 f"{metrics.time_ms:>8.2f}ms"
             )
         return "\n".join(rows)
@@ -548,6 +597,8 @@ class App:
         if value is None:
             return "-"
         if isinstance(value, float):
+            if value == float("inf"):
+                return "inf"
             return f"{value:.2f}"
         return str(value)
 
@@ -616,6 +667,49 @@ class App:
     def _format_local_search_log(self, step: StepEvent) -> str:
         prefix = self._step_prefix(step)
         data = step.data
+        if data.get("local_search_mode") == "heuristic_path":
+            current = step.current_node or "-"
+            h_value = self._format_number(data.get("current_heuristic"))
+            chosen = data.get("chosen_neighbor") or "-"
+            path = self._format_path(data.get("path_so_far", step.path))
+            if step.event_type == "info":
+                return (
+                    f"{prefix} khởi tạo Local Search trên đồ thị trọng số; bắt đầu tại {current}; "
+                    f"h({current})={h_value}; goal={data.get('goal', '-')}."
+                )
+            if step.event_type == "found":
+                return (
+                    f"{prefix} đã tới goal {current}; đường đi={path}; "
+                    f"chi phí đường đi={self._format_number(data.get('path_cost'))}."
+                )
+            if step.event_type == "failure":
+                return (
+                    f"{prefix} dừng tại {current}: rơi vào local maximum/local optimum; "
+                    f"không có láng giềng nào có h thấp hơn {h_value}; đường đi={path}."
+                )
+            if step.algorithm == "Simulated Annealing":
+                accepted = data.get("accepted")
+                decision = "chấp nhận" if accepted else "từ chối"
+                return (
+                    f"{prefix} SA xét láng giềng {chosen}; h hiện tại={h_value}; "
+                    f"h ứng viên={self._format_number(data.get('candidate_heuristic'))}; "
+                    f"delta={self._format_number(data.get('delta'))}; "
+                    f"T={self._format_number(data.get('temperature'))}; "
+                    f"p={self._format_number(data.get('accept_probability'))}; {decision}."
+                )
+            if step.event_type == "move":
+                return (
+                    f"{prefix} chọn láng giềng {current} vì h thấp hơn; "
+                    f"h({current})={h_value}; đường đi={path}."
+                )
+            checked = data.get("neighbors_checked")
+            checked_text = f" đã xét {checked} láng giềng;" if checked is not None else ""
+            neighbor_text = self._format_neighbor_scores(data.get("neighbor_scores", []))
+            return (
+                f"{prefix}{checked_text} node hiện tại={current}, h={h_value}; "
+                f"đang xét/chọn={chosen}; láng giềng: {neighbor_text}."
+            )
+
         value = data.get("defense_value")
         risk = data.get("risk_cost")
         blocked = data.get("blocked_paths")
@@ -668,13 +762,25 @@ class App:
             f"DefenseValue={self._format_number(value)}, RiskCost={self._format_number(risk)}."
         )
 
+    def _format_neighbor_scores(self, rows: Any) -> str:
+        if not isinstance(rows, list) or not rows:
+            return "-"
+        parts: list[str] = []
+        for row in rows[:4]:
+            if not isinstance(row, dict):
+                continue
+            parts.append(f"{row.get('node')} h={self._format_number(row.get('heuristic'))}")
+        if len(rows) > 4:
+            parts.append(f"+{len(rows) - 4}")
+        return "; ".join(parts) if parts else "-"
+
     def _format_defense_config(self, config: Any) -> str:
         if not config:
-            return "Firewall=-; IDS=-; Nâng cấp=-"
+            return "FW chặn=-; IDS giám sát=-; UP tăng bảo mật=-"
         return (
-            f"Firewall={self._format_list(getattr(config, 'firewall_nodes', []), 3)}; "
-            f"IDS={self._format_list(getattr(config, 'ids_nodes', []), 3)}; "
-            f"Nâng cấp={self._format_list(getattr(config, 'upgraded_nodes', []), 3)}"
+            f"FW chặn tại={self._format_list(getattr(config, 'firewall_nodes', []), 3)}; "
+            f"IDS giám sát={self._format_list(getattr(config, 'ids_nodes', []), 3)}; "
+            f"UP tăng bảo mật={self._format_list(getattr(config, 'upgraded_nodes', []), 3)}"
         )
 
     def _format_csp_log(self, step: StepEvent) -> str:
@@ -695,12 +801,20 @@ class App:
             )
         if step.event_type == "assign":
             attempt = self._assignment_attempt(step, current)
-            verdict = "nhất quán tạm thời" if not conflicts else f"vi phạm {len(conflicts)} ràng buộc"
+            verdict = "nhất quán tạm thời" if not conflicts else f"vi phạm {len(conflicts)} ràng buộc: {conflicts[0]}"
             return (
                 f"{prefix} kiểm tra phép gán {current}={attempt}; "
                 f"kết quả {verdict}; số biến đã gán={assigned_count}."
             )
         if step.event_type == "update":
+            if step.algorithm == "Min-Conflicts":
+                old_value = data.get("old_value", "-")
+                new_value = data.get("new_value", current_value)
+                best = data.get("best_conflicts", len(conflicts))
+                return (
+                    f"{prefix} chọn biến đang xung đột {current}; đổi zone {old_value} -> {new_value}; "
+                    f"số xung đột tốt nhất sau đổi={best}."
+                )
             prune_text = f"; loại miền {self._format_domain_removal(removed)}" if removed else ""
             return (
                 f"{prefix} chấp nhận gán {current}={current_value}{prune_text}; "
@@ -716,6 +830,9 @@ class App:
         return f"{prefix} không tìm được nghiệm CSP hợp lệ; xung đột còn lại={len(conflicts)}."
 
     def _assignment_attempt(self, step: StepEvent, current: str) -> str:
+        attempted = step.data.get("attempted_value")
+        if attempted:
+            return str(attempted)
         marker = f"{current} = "
         if marker not in step.message:
             return "-"

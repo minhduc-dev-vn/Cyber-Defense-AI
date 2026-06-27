@@ -1,4 +1,4 @@
-"""Tests for Phase 5 local-search algorithms."""
+"""Tests for weighted-graph local-search algorithms."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,11 +9,10 @@ from algorithms.local_search import (
     steepest_hill_climbing,
 )
 from algorithms.local_search.common import (
-    defense_value,
-    initial_config,
-    occupied_nodes,
-    resource_cost,
-    risk_cost,
+    heuristic_value,
+    neighbor_heuristics,
+    path_cost,
+    shortest_path_to_goal,
 )
 from core.map_loader import load_map
 
@@ -25,34 +24,46 @@ def _local_map():
     return load_map(ROOT / "maps" / "defense_optimization.json")
 
 
-def _assert_valid_config(result) -> None:
-    config = result.final_state
-    assert config is not None
-    assert resource_cost(config) == 4
-    assert len(occupied_nodes(config)) == 4
+def _assert_goal_path(result) -> None:
+    assert result.success
+    assert result.metrics.path
+    assert result.metrics.path[-1] == "Server"
+    assert result.metrics.extra["local_search_mode"] == "heuristic_path"
+    assert result.metrics.extra["final_heuristic"] == 0
 
 
-def test_simple_hill_climbing_improves_or_keeps_initial_value() -> None:
+def test_heuristic_is_shortest_weighted_cost_to_goal() -> None:
     data = _local_map()
-    initial = initial_config(data.graph, data.hacker_start, data.goal_nodes)
-    initial_value = defense_value(data.graph, data.hacker_start, data.goal_nodes, initial)
 
+    cost, path = shortest_path_to_goal(data.graph, "Hacker", data.goal_nodes)
+
+    assert cost == heuristic_value(data.graph, "Hacker", data.goal_nodes)
+    assert path[0] == "Hacker"
+    assert path[-1] == "Server"
+    assert path_cost(data.graph, path) == cost
+
+
+def test_simple_hill_climbing_moves_to_lower_heuristic_until_goal() -> None:
+    data = _local_map()
     result = simple_hill_climbing.run(data.graph, data.hacker_start, data.goal_nodes)
 
-    assert result.success
-    _assert_valid_config(result)
-    assert result.metrics.total_cost >= initial_value
-    assert "defense_value" in result.metrics.extra
+    _assert_goal_path(result)
+    move_steps = [step for step in result.steps if step.event_type == "move"]
+    assert move_steps
+    assert all(step.data["current_heuristic"] >= 0 for step in move_steps)
+    assert any(step.data.get("neighbor_scores") for step in result.steps)
 
 
-def test_steepest_hill_climbing_checks_neighbor_batches() -> None:
+def test_steepest_hill_climbing_checks_all_neighbors_before_move() -> None:
     data = _local_map()
     result = steepest_hill_climbing.run(data.graph, data.hacker_start, data.goal_nodes)
 
-    assert result.success
-    _assert_valid_config(result)
-    assert any("neighbors_checked" in step.data for step in result.steps)
-    assert result.metrics.extra["defense_value"] == result.metrics.total_cost
+    _assert_goal_path(result)
+    scan_steps = [step for step in result.steps if "neighbors_checked" in step.data]
+    assert scan_steps
+    assert scan_steps[0].data["neighbors_checked"] == len(
+        neighbor_heuristics(data.graph, data.hacker_start, data.goal_nodes)
+    )
 
 
 def test_simulated_annealing_is_seed_reproducible() -> None:
@@ -72,21 +83,7 @@ def test_simulated_annealing_is_seed_reproducible() -> None:
         max_steps=30,
     )
 
-    assert first.success
-    assert second.success
-    _assert_valid_config(first)
-    _assert_valid_config(second)
+    assert first.success == second.success
     assert first.final_state == second.final_state
     assert first.metrics.total_cost == second.metrics.total_cost
-
-
-def test_risk_cost_and_defense_value_are_real_scores() -> None:
-    data = _local_map()
-    config = initial_config(data.graph, data.hacker_start, data.goal_nodes)
-
-    value = defense_value(data.graph, data.hacker_start, data.goal_nodes, config)
-    risk = risk_cost(data.graph, data.hacker_start, data.goal_nodes, config)
-
-    assert isinstance(value, int)
-    assert isinstance(risk, int)
-    assert value != risk
+    assert first.metrics.extra["local_search_mode"] == "heuristic_path"

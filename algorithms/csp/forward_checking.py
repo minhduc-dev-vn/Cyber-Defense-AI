@@ -30,9 +30,13 @@ def solve_steps(
         event_type: str,
         message: str,
         current: str | None = None,
+        attempted_value: str | None = None,
         removed: dict[str, list[str]] | None = None,
         violations: list[str] | None = None,
+        candidate_index: int | None = None,
+        candidate_total: int | None = None,
     ) -> StepEvent:
+        current_domain = list(domains.get(current, [])) if current else []
         step = StepEvent(
             step_index=counters["step"],
             algorithm="Forward Checking",
@@ -48,9 +52,14 @@ def solve_steps(
             data={
                 "assignments": dict(assignment),
                 "domains": {k: list(v) for k, v in domains.items()},
+                "current_domain": current_domain,
+                "attempted_value": attempted_value,
                 "removed": removed or {},
                 "conflicts": violations or [],
                 "backtracks": counters["backtracks"],
+                "candidate_index": candidate_index,
+                "candidate_total": candidate_total,
+                "assigned_count": len(assignment),
             },
         )
         counters["step"] += 1
@@ -93,13 +102,17 @@ def solve_steps(
         if var is None:
             return
 
-        for value in list(domains[var]):
+        values = list(domains[var])
+        for idx, value in enumerate(values, start=1):
             ok, violations = is_consistent(graph, assignment, var, value)
             yield make_step(
                 "assign",
                 f"[Step {counters['step']:03d}] Forward Checking: try {var} = {value}.",
                 current=var,
+                attempted_value=value,
                 violations=violations,
+                candidate_index=idx,
+                candidate_total=len(values),
             )
             if not ok:
                 continue
@@ -113,6 +126,7 @@ def solve_steps(
                 "update",
                 f"[Step {counters['step']:03d}] Forward Checking: assign {var} = {value}; prune {removed}.",
                 current=var,
+                attempted_value=value,
                 removed=removed,
                 violations=prune_violations,
             )

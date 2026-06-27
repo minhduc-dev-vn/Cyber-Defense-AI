@@ -58,3 +58,22 @@ def test_csp_steps_expose_assignments_for_ui_coloring() -> None:
 
     assert result.steps[-1].data["assignments"]
     assert result.steps[-1].highlighted_edges
+
+
+def test_csp_steps_expose_attempted_zone_for_visual_simulation() -> None:
+    data = _csp_map()
+    result = backtracking.run(data.graph, data.hacker_start, data.goal_nodes)
+
+    assign_steps = [step for step in result.steps if step.event_type == "assign"]
+
+    assert assign_steps
+    assert assign_steps[0].data["attempted_value"] in {
+        "User Zone",
+        "DMZ",
+        "Server Zone",
+        "Quarantine Zone",
+    }
+    assert "domains" in assign_steps[0].data
+    assert assign_steps[0].data["current_domain"]
+    assert assign_steps[0].data["candidate_index"] == 1
+    assert assign_steps[0].data["candidate_total"] >= 1

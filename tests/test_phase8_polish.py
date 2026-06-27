@@ -110,7 +110,7 @@ def test_algorithm_log_is_group_specific(app: App) -> None:
     expected_terms = {
         0: "queue FIFO",
         1: "heuristic",
-        2: "DefenseValue",
+        2: "Local Search",
         3: "CSP phân vùng mạng",
         4: "trạng thái niềm tin",
         5: "Hacker(MAX) - Defender(MIN)",
@@ -149,6 +149,32 @@ def test_monitoring_prioritizes_idastar_heuristic_values() -> None:
         ("f(n)=g+h", "5.00"),
         ("Ngưỡng f", "6.00"),
     ]
+
+
+def test_monitoring_prioritizes_csp_assignment_context() -> None:
+    view = StatsView(pygame.Rect(0, 0, 420, 160))
+    step = StepEvent(
+        step_index=2,
+        algorithm="Backtracking",
+        event_type="assign",
+        current_node="PC1",
+        data={
+            "assignments": {},
+            "domains": {"PC1": ["User Zone", "DMZ"]},
+            "attempted_value": "User Zone",
+            "conflicts": [],
+        },
+    )
+
+    rows = view._monitor_rows(step, show_details=True)
+
+    assert rows[0][1] == "PC1"
+    assert rows[1][0].startswith("Miền")
+    assert rows[1][1] == "User, DMZ"
+    assert rows[2][0] == "Đang thử"
+    assert rows[2][1] == "User Zone"
+    assert rows[3][1] == "OK"
+    assert rows[4][1] == "0 node"
 
 
 def test_log_view_can_scroll_back_down_after_reaching_top(monkeypatch) -> None:

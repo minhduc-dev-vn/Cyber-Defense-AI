@@ -74,7 +74,7 @@ ALGO_LABELS = {
 MAP_LABELS = {
     "pathfinding_basic": "Map 1 - Tìm đường cơ bản",
     "weighted_network": "Map 2 - Mạng có trọng số",
-    "defense_optimization": "Map 3 - Tối ưu phòng thủ",
+    "defense_optimization": "Map 3 - Local Search trọng số",
     "csp_segmentation": "Map 4 - Phân vùng CSP",
     "belief_hidden": "Map 5 - Mạng ẩn",
     "belief_partial": "Map 6 - Quan sát một phần",

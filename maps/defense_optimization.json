@@ -1,8 +1,8 @@
 {
-  "name": "Tối ưu phòng thủ (Local Search)",
-  "description": "10 node, nhiều vị trí Firewall/IDS, có local optimum rõ ràng. Dùng cho Simple HC, Steepest HC, Simulated Annealing.",
+  "name": "Local Search - Heuristic đường đi",
+  "description": "Map trọng số cho Hill Climbing: h(n) là chi phí đường đi ngắn nhất từ node hiện tại tới Server.",
   "hacker_start": "Hacker",
-  "goal_nodes": ["Server", "Database"],
+  "goal_nodes": ["Server"],
   "nodes": [
     {"id": "Hacker",   "kind": "pc",       "position": [80,  300], "security_level": 1,  "zone": "User Zone",    "blocked": false, "visible": true, "compromised": true,  "monitored": false, "importance": 1, "detection_risk": 0.0},
     {"id": "PC1",      "kind": "pc",       "position": [220, 180], "security_level": 2,  "zone": "User Zone",    "blocked": false, "visible": true, "compromised": false, "monitored": false, "importance": 3, "detection_risk": 0.1},
@@ -16,20 +16,19 @@
     {"id": "Database", "kind": "database", "position": [820, 420], "security_level": 10, "zone": "Server Zone",  "blocked": false, "visible": true, "compromised": false, "monitored": true,  "importance": 10,"detection_risk": 1.0}
   ],
   "edges": [
-    {"source": "Hacker",   "target": "PC1",      "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "Hacker",   "target": "PC2",      "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "PC1",      "target": "Switch1",  "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "PC2",      "target": "Switch2",  "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "Switch1",  "target": "Router",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "Switch2",  "target": "Router",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "Router",   "target": "FW_Slot1", "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "Router",   "target": "FW_Slot2", "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "FW_Slot1", "target": "Server",   "base_cost": 1.0, "blocked": false, "bidirectional": true},
-    {"source": "FW_Slot2", "target": "Database", "base_cost": 1.0, "blocked": false, "bidirectional": true}
+    {"source": "Hacker",   "target": "PC1",      "base_cost": 2.0, "blocked": false, "bidirectional": true},
+    {"source": "Hacker",   "target": "PC2",      "base_cost": 6.0, "blocked": false, "bidirectional": true},
+    {"source": "PC1",      "target": "Switch1",  "base_cost": 2.0, "blocked": false, "bidirectional": true},
+    {"source": "PC2",      "target": "Switch2",  "base_cost": 2.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch1",  "target": "Router",   "base_cost": 5.0, "blocked": false, "bidirectional": true},
+    {"source": "Switch2",  "target": "Router",   "base_cost": 2.0, "blocked": false, "bidirectional": true},
+    {"source": "Router",   "target": "FW_Slot1", "base_cost": 2.0, "blocked": false, "bidirectional": true},
+    {"source": "Router",   "target": "FW_Slot2", "base_cost": 6.0, "blocked": false, "bidirectional": true},
+    {"source": "FW_Slot1", "target": "Server",   "base_cost": 2.0, "blocked": false, "bidirectional": true},
+    {"source": "FW_Slot2", "target": "Database", "base_cost": 3.0, "blocked": false, "bidirectional": true}
   ],
   "metadata": {
     "group": "local_search",
-    "defense_resources": {"firewalls": 2, "ids": 1, "upgrades": 1},
-    "notes": "Có local optimum: đặt Firewall tại Router chặn 1 đường nhưng không tối ưu. Defender cần khám phá để tìm cấu hình tốt hơn."
+    "notes": "Local Search chọn láng giềng có h thấp hơn. h(n) là shortest weighted path từ n tới Server; Database là nhánh không phải mục tiêu."
   }
 }
