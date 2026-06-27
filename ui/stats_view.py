@@ -68,6 +68,8 @@ class StatsView:
             visible_rows = rows[:5]
         elif step and step.algorithm == "IDA*":
             visible_rows = rows[:5]
+        elif step and "belief" in (step.data or {}):
+            visible_rows = rows[:5]
         else:
             visible_rows = rows[:4]
         row_gap = 4
@@ -153,15 +155,20 @@ class StatsView:
 
         if "belief" in data:
             belief = data.get("belief", [])
-            blocked = data.get("blocked_nodes", [])
+            blocked = self._complex_blocked_nodes(data)
             observed = data.get("observed_nodes", [])
+            plan = data.get("plan") or data.get("plan_lines") or []
+            plan_count = len(plan) if isinstance(plan, list) else 0
+            model = "AND-OR" if data.get("plan_tree") is not None else ("Quan sát một phần" if observed else "Không quan sát")
             rows = [
-                ("Belief", ", ".join(str(n) for n in belief) if belief else "∅ (trống)"),
+                ("Mô hình", model),
+                ("Belief", ", ".join(str(n) for n in belief) if belief else "∅ an toàn"),
                 ("Đang xét", step.current_node if step.current_node else "-"),
                 ("Đã chặn", ", ".join(str(n) for n in blocked) if blocked else "(chưa có)"),
+                ("Kế hoạch", f"{plan_count} bước" if plan_count else "đang tìm"),
             ]
             if observed:
-                rows.append(("IDS quét", ", ".join(str(n) for n in observed[:4])))
+                rows[2] = ("IDS quét", ", ".join(str(n) for n in observed[:4]))
             return rows
 
         rows = [
@@ -494,34 +501,37 @@ class StatsView:
         status_label: str,
     ) -> None:
         belief = data.get("belief", [])
-        blocked = data.get("blocked_nodes", [])
+        blocked = self._complex_blocked_nodes(data)
         observed = data.get("observed_nodes", [])
         plan = data.get("plan", data.get("plan_lines", []))
         plan_tree = data.get("plan_tree")
-        algo_type = "AND-OR" if plan_tree is not None else ("Partial" if observed else "Sensorless")
+        plan_count = len(plan) if isinstance(plan, list) else 0
+        algo_type = "AND-OR có điều kiện" if plan_tree is not None else ("Belief quan sát một phần" if observed else "Belief không quan sát")
+        danger_text = "đã loại trừ nghi ngờ" if not belief else f"{len(belief)} vị trí nghi ngờ"
         rows = [
-            ("Mô phỏng", f"Belief-State ({algo_type})"),
-            ("Belief hiện tại", f"{len(belief)} vị trí: " + ("∅" if not belief else ", ".join(str(n) for n in belief))),
-            ("Đã chặn", ", ".join(str(n) for n in blocked) if blocked else "(chưa có)"),
-            ("IDS quét", ", ".join(str(n) for n in observed) if observed else "-"),
-            ("Kế hoạch", f"{len(plan)} bước" if isinstance(plan, list) and plan else "Đang tính..."),
+            ("Mô hình", algo_type),
+            ("Belief", danger_text + (": " + ", ".join(str(n) for n in belief) if belief else "")),
+            ("Đã chặn", ", ".join(str(n) for n in blocked) if blocked else "(chưa chặn node nào)"),
+            ("IDS quét", ", ".join(str(n) for n in observed) if observed else "không có quan sát trực tiếp"),
+            ("Kế hoạch", f"{plan_count} bước/nhánh" if plan_count else "đang tính toán"),
             ("Trạng thái", status_label),
         ]
-        y = rect.y + 36
-        label_w = min(116, max(88, rect.width // 3))
+        y = rect.y + 34
+        label_w = min(108, max(84, rect.width // 3))
         value_w = max(40, rect.width - label_w - 32)
-        value_font = get_font(8)
-        line_h = value_font.get_linesize()
+        value_font = get_font(8, bold=True)
+        line_h = max(13, value_font.get_linesize())
         max_y = rect.bottom - 6
         for label, value in rows:
             color = (
                 status_color if label == "Trạng thái"
-                else (220, 80, 255) if label == "Belief hiện tại"
+                else (220, 80, 255) if label == "Belief"
                 else (100, 200, 255) if label == "IDS quét"
+                else COLOR_TEXT_ERROR if label == "Đã chặn" and blocked
                 else COLOR_TEXT_PRIMARY
             )
             wrapped = self._wrap_text(str(value), value_font, value_w)
-            row_h = max(16, len(wrapped) * line_h)
+            row_h = max(17, len(wrapped) * line_h)
             if y + row_h > max_y:
                 row_h = max(14, max_y - y)
             draw_text_fit(surface, label + ":", pygame.Rect(rect.x + 14, y, label_w, min(row_h, 18)), COLOR_TEXT_PRIMARY, size=8, bold=True)
@@ -545,7 +555,7 @@ class StatsView:
     ) -> None:
         """Right panel: display plan steps / AND-OR tree."""
         belief = data.get("belief", [])
-        blocked = data.get("blocked_nodes", [])
+        blocked = self._complex_blocked_nodes(data)
         plan = data.get("plan", [])
         plan_tree = data.get("plan_tree")
         plan_lines = data.get("plan_lines", [])
@@ -554,77 +564,131 @@ class StatsView:
         y = rect.y + 34
         w = rect.width - 28
 
-        # Belief state bar
-        belief_label = get_font(9, bold=True).render("Belief (vùng nghi ngờ):", True, (220, 80, 255))
-        surface.blit(belief_label, (rect.x + 14, y))
-        y += 16
-        if belief:
-            chip_w, chip_h, gap = 52, 18, 5
-            x_chip = rect.x + 14
-            max_chip_y = rect.bottom - 22
-            for node_id in belief:
-                if x_chip + chip_w > rect.right - 14:
-                    x_chip = rect.x + 14
-                    y += chip_h + gap
-                if y + chip_h > max_chip_y:
-                    break
-                chip_rect = pygame.Rect(x_chip, y, chip_w, chip_h)
-                pygame.draw.rect(surface, (55, 12, 70), chip_rect, border_radius=5)
-                pygame.draw.rect(surface, (220, 80, 255), chip_rect, 1, border_radius=5)
-                draw_text_fit(surface, str(node_id), chip_rect, (230, 190, 255), size=8, bold=True)
-                x_chip += chip_w + gap
-        else:
-            draw_text_fit(surface, "∅  Hacker không còn đường xâm nhập", pygame.Rect(rect.x + 14, y, w, 18), COLOR_TEXT_SUCCESS, size=8, bold=True)
-        y += 24
-
-        # Blocked nodes
-        if blocked:
-            block_label = get_font(9, bold=True).render("Đã chặn:", True, COLOR_TEXT_ERROR)
-            surface.blit(block_label, (rect.x + 14, y))
-            draw_text_fit(
-                surface,
-                ", ".join(str(n) for n in blocked),
-                pygame.Rect(rect.x + 80, y, w - 66, 16),
-                COLOR_TEXT_ERROR,
-                size=8,
-            )
-            y += 18
-
-        # IDS observed
+        y = self._draw_chip_group(
+            surface,
+            rect,
+            y,
+            "Belief - vùng nghi ngờ",
+            belief,
+            (220, 80, 255),
+            empty_text="∅  không còn vị trí nghi ngờ",
+        )
         if observed:
-            ids_label = get_font(9, bold=True).render("IDS quét:", True, (100, 200, 255))
-            surface.blit(ids_label, (rect.x + 14, y))
-            draw_text_fit(
-                surface,
-                ", ".join(str(n) for n in observed[:5]),
-                pygame.Rect(rect.x + 80, y, w - 66, 16),
-                (100, 200, 255),
-                size=8,
-            )
-            y += 18
+            y = self._draw_chip_group(surface, rect, y + 2, "IDS quan sát", observed, (100, 200, 255))
+        if blocked:
+            y = self._draw_chip_group(surface, rect, y + 2, "Node đã chặn", blocked, COLOR_TEXT_ERROR)
 
         # Plan / tree
         pygame.draw.line(surface, (30, 55, 80), (rect.x + 14, y), (rect.right - 14, y), 1)
-        y += 6
-        plan_title_text = "Cây kế hoạch AND-OR:" if plan_tree is not None else ("Các bước phòng thủ:" if plan else "Đang tìm kế hoạch...")
+        y += 7
+        plan_title_text = "Cây kế hoạch AND-OR" if plan_tree is not None else ("Các bước phòng thủ" if plan else "Đang tìm kế hoạch")
         plan_title = get_font(9, bold=True).render(plan_title_text, True, (116, 195, 255))
         surface.blit(plan_title, (rect.x + 14, y))
-        y += 16
+        y += 17
         lines_to_show = plan_lines if plan_lines else ([item for item in plan] if isinstance(plan, list) else [])
-        for line in lines_to_show[:6]:
-            if y + 14 > rect.bottom - 6:
+        visible_count = 0
+        font = get_font(8)
+        line_h = max(13, font.get_linesize())
+        for line in lines_to_show:
+            if y + line_h > rect.bottom - 6:
                 break
             indent = 0
             text = str(line)
             while text.startswith(" "):
-                indent += 8
+                indent += 7
                 text = text[1:]
+            label = self._complex_plan_label(text)
             is_leaf = "Safe" in text or "∅" in text or "an toàn" in text.lower()
-            color = COLOR_TEXT_SUCCESS if is_leaf else COLOR_TEXT_PRIMARY
-            draw_text_fit(surface, text, pygame.Rect(rect.x + 14 + indent, y, w - indent, 14), color, size=8)
-            y += 14
+            is_branch = "If " in text or "nếu" in text.lower()
+            color = COLOR_TEXT_SUCCESS if is_leaf else ((100, 200, 255) if is_branch else COLOR_TEXT_PRIMARY)
+            bullet_rect = pygame.Rect(rect.x + 14 + indent, y + 4, 6, 6)
+            pygame.draw.rect(surface, color, bullet_rect, border_radius=2)
+            wrapped = self._wrap_text(label, font, max(24, w - indent - 12))
+            for wrapped_line in wrapped:
+                if y + line_h > rect.bottom - 6:
+                    break
+                surface.blit(font.render(wrapped_line, True, color), (rect.x + 24 + indent, y))
+                y += line_h
+            visible_count += 1
+        hidden_count = max(0, len(lines_to_show) - visible_count)
+        if hidden_count and y + 14 <= rect.bottom - 6:
+            draw_text_fit(surface, f"+ {hidden_count} dòng kế hoạch khác", pygame.Rect(rect.x + 14, y, w, 14), COLOR_TEXT_SECONDARY, size=8)
         if not lines_to_show and y + 18 < rect.bottom:
-            draw_text_fit(surface, "BFS đang xét các kết hợp chặn...", pygame.Rect(rect.x + 14, y, w, 16), COLOR_TEXT_SECONDARY, size=8)
+            draw_text_fit(surface, "Đang xét các tổ hợp chặn để làm belief an toàn...", pygame.Rect(rect.x + 14, y, w, 16), COLOR_TEXT_SECONDARY, size=8)
+
+    def _draw_chip_group(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        y: int,
+        title: str,
+        values: object,
+        color: tuple[int, int, int],
+        *,
+        empty_text: str = "-",
+    ) -> int:
+        w = rect.width - 28
+        title_font = get_font(8, bold=True)
+        surface.blit(title_font.render(title + ":", True, color), (rect.x + 14, y))
+        y += 14
+        items = [str(value) for value in values] if isinstance(values, list) else []
+        if not items:
+            draw_text_fit(surface, empty_text, pygame.Rect(rect.x + 14, y, w, 16), COLOR_TEXT_SECONDARY, size=8)
+            return y + 18
+
+        chip_h = 17
+        gap = 5
+        x = rect.x + 14
+        max_y = rect.bottom - 40
+        for item in items:
+            chip_w = max(42, min(96, get_font(8, bold=True).size(item)[0] + 16))
+            if x + chip_w > rect.right - 14:
+                x = rect.x + 14
+                y += chip_h + gap
+            if y + chip_h > max_y:
+                break
+            chip_rect = pygame.Rect(x, y, chip_w, chip_h)
+            pygame.draw.rect(surface, (8, 18, 30), chip_rect, border_radius=5)
+            pygame.draw.rect(surface, color, chip_rect, 1, border_radius=5)
+            draw_text_fit(surface, item, chip_rect.inflate(-6, 0), color, size=8, bold=True)
+            x += chip_w + gap
+        return y + chip_h + 6
+
+    def _complex_blocked_nodes(self, data: dict) -> list[str]:
+        blocked = data.get("blocked_nodes", [])
+        if isinstance(blocked, list) and blocked:
+            return [str(node) for node in blocked]
+
+        plan_tree = data.get("plan_tree")
+        collected: list[str] = []
+
+        def visit(node: object) -> None:
+            if not isinstance(node, dict):
+                return
+            for blocked_node in node.get("blocked_nodes", []) or []:
+                text = str(blocked_node)
+                if text not in collected:
+                    collected.append(text)
+            for subtree in (node.get("branches", {}) or {}).values():
+                visit(subtree)
+
+        visit(plan_tree)
+        return collected
+
+    def _complex_plan_label(self, text: str) -> str:
+        label = text.strip()
+        replacements = {
+            "Try isolate ": "Thử cô lập ",
+            "Try block ": "Thử chặn ",
+            "Safe with blocked=": "An toàn khi đã chặn ",
+            "If success -> ": "Nếu thành công -> ",
+            "If fallback -> ": "Nếu dự phòng -> ",
+            "If miss -> ": "Nếu bỏ sót -> ",
+            "If detect -> ": "Nếu phát hiện -> ",
+        }
+        for source, target in replacements.items():
+            label = label.replace(source, target)
+        return label
 
     def _draw_local_search_result(
         self,
