@@ -456,7 +456,9 @@ class App:
                     max_steps=min(self.state.sa_max_steps, 120),
                 )
             elif group == 3 and expected_name == "Min-Conflicts":
-                result = run_func(graph, start, goals, seed=seed, max_steps=300)
+                from algorithms.csp.min_conflicts import DEMO_SEED
+
+                result = run_func(graph, start, goals, seed=DEMO_SEED, max_steps=300)
             elif group == 4:
                 result = run_func(graph, start, goals, metadata=self._map_data.metadata)
             elif group == 5:
@@ -572,11 +574,13 @@ class App:
                 max_steps=self.state.sa_max_steps,
             )
         elif group == 3 and algo_idx == 2:
+            from algorithms.csp.min_conflicts import DEMO_SEED
+
             self._step_gen = solve_steps(
                 self._map_data.graph,
                 start,
                 goals,
-                seed=seed,
+                seed=DEMO_SEED,
                 max_steps=300,
             )
         elif group == 4:

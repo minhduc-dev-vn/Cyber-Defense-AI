@@ -15,6 +15,9 @@ from core.graph import NetworkGraph
 from core.models import AlgorithmMetrics, AlgorithmResult, CSPAssignment, StepEvent
 
 
+DEMO_SEED = 1169
+
+
 def _conflicted_variables(graph: NetworkGraph, assignment: dict[str, str]) -> list[str]:
     return [
         node.id
@@ -39,7 +42,7 @@ def solve_steps(
     graph: NetworkGraph,
     start: str = "",
     goals: list[str] | None = None,
-    seed: int = 42,
+    seed: int = DEMO_SEED,
     max_steps: int = 200,
 ) -> Iterator[StepEvent]:
     """Yield Min-Conflicts CSP steps."""
@@ -148,7 +151,7 @@ def run(
     graph: NetworkGraph,
     start: str = "",
     goals: list[str] | None = None,
-    seed: int = 42,
+    seed: int = DEMO_SEED,
     max_steps: int = 200,
 ) -> AlgorithmResult:
     """Run Min-Conflicts and return a full result."""
