@@ -89,8 +89,8 @@ class AppState:
     show_details: bool = True
 
     # Simulated Annealing params
-    sa_t0: float = 100.0
-    sa_alpha: float = 0.95
+    sa_t0: float = 5.0
+    sa_alpha: float = 0.85
     sa_tmin: float = 0.1
     sa_max_steps: int = 1000
 

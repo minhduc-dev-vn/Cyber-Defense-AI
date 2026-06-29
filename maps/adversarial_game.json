@@ -53,7 +53,7 @@
   ],
   "metadata": {
     "group": "adversarial",
-    "max_turns": 14,
+    "max_turns": 11,
     "ids_detect_prob": 0.7,
     "firewall_block_prob": 0.8,
     "notes": "Larger adversarial map with redundant DMZ, VPN, cloud, IDS and firewall paths. Edge colors show attacker movement and defender response."

@@ -168,7 +168,7 @@ class NetworkGraph:
         Đây là heuristic admissible (không bao giờ vượt quá chi phí thật).
         """
         # Tìm hop count bằng BFS (bỏ qua blocked)
-        hop_count = self._bfs_hop_count(node_id, goal_id)
+        hop_count = self._bfs_hop_count(node_id, goal_id, ignore_blocked=True)
         if hop_count == float("inf"):
             return float("inf")
 
@@ -176,8 +176,8 @@ class NetworkGraph:
         min_edge = self._min_edge_cost()
         return hop_count * min_edge
 
-    def _bfs_hop_count(self, start: str, goal: str) -> float:
-        """BFS tính số bước tối thiểu từ start đến goal (bỏ qua blocked)."""
+    def _bfs_hop_count(self, start: str, goal: str, ignore_blocked: bool = True) -> float:
+        """BFS tính số bước tối thiểu từ start đến goal."""
         if start == goal:
             return 0
         visited: Set[str] = {start}
@@ -188,7 +188,7 @@ class NetworkGraph:
                 if neighbor_id in visited:
                     continue
                 neighbor = self._nodes.get(neighbor_id)
-                if edge.blocked or (neighbor and neighbor.blocked):
+                if ignore_blocked and (edge.blocked or (neighbor and neighbor.blocked)):
                     continue
                 if neighbor_id == goal:
                     return dist + 1
@@ -200,13 +200,16 @@ class NetworkGraph:
         """Chi phí cạnh tối thiểu trong đồ thị (dùng cho heuristic)."""
         if not self._edges:
             return MIN_EDGE_COST
-        return min(e.base_cost for e in self._edges if not e.blocked) or MIN_EDGE_COST
+        unblocked_costs = [e.base_cost for e in self._edges if not e.blocked]
+        if not unblocked_costs:
+            return MIN_EDGE_COST
+        return min(unblocked_costs) or MIN_EDGE_COST
 
     # ── Kiểm tra kết nối ──────────────────────────────────────────────────────
 
     def has_path(self, start: str, goal: str, ignore_blocked: bool = True) -> bool:
         """Kiểm tra có đường đi từ start đến goal hay không."""
-        return self._bfs_hop_count(start, goal) < float("inf")
+        return self._bfs_hop_count(start, goal, ignore_blocked=ignore_blocked) < float("inf")
 
     def all_simple_paths(
         self,

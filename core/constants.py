@@ -32,8 +32,8 @@ EVAL_HACKER_DETECTED: int = -150
 EVAL_HACKER_NO_PATH: int = -300
 
 # ─── Simulated Annealing mặc định ────────────────────────────────────────────
-SA_DEFAULT_T0: float = 100.0
-SA_DEFAULT_ALPHA: float = 0.95
+SA_DEFAULT_T0: float = 5.0
+SA_DEFAULT_ALPHA: float = 0.85
 SA_DEFAULT_TMIN: float = 0.1
 SA_DEFAULT_MAX_STEPS: int = 1000
 

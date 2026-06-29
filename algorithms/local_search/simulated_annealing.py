@@ -106,8 +106,8 @@ def solve_steps(
         candidate = rng.choice(candidates)
         candidate_node = str(candidate["node"])
         candidate_h = float(candidate["heuristic"])
-        current_h = heuristic_value(graph, current, goals)
-        delta = candidate_h - current_h
+        previous_h = heuristic_value(graph, current, goals)
+        delta = candidate_h - previous_h
         probability = 1.0 if delta <= 0 else math.exp(-delta / max(temperature, 1e-9))
         roll = rng.random()
         accepted = delta <= 0 or roll < probability
@@ -118,16 +118,15 @@ def solve_steps(
                 accepted_worse += 1
             current = candidate_node
             path.append(current)
-            current_h = candidate_h
-            if current_h < best_h:
+            if candidate_h < best_h:
                 best = current
-                best_h = current_h
+                best_h = candidate_h
 
         yield make_step(
             "move" if accepted else "update",
             (
                 f"[Step {step_idx:03d}] SA: candidate {candidate_node}; "
-                f"h_next={format_cost_value(candidate_h)}, h_current={format_cost_value(current_h)}, "
+                f"h_next={format_cost_value(candidate_h)}, h_current={format_cost_value(previous_h)}, "
                 f"delta={format_cost_value(delta)}, p={probability:.3f}, r={roll:.3f}, "
                 f"{'accept' if accepted else 'reject'} ({reason})."
             ),
@@ -139,6 +138,7 @@ def solve_steps(
                 "accept_probability": probability,
                 "random_value": roll,
                 "candidate_heuristic": candidate_h,
+                "previous_heuristic": previous_h,
             },
         )
         step_idx += 1

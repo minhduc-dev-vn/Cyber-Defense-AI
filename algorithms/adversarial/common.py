@@ -145,8 +145,6 @@ def hacker_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> l
         actions.append(Action("hacker", "move", neighbor, f"Move to {neighbor}"))
     if state.hacker_position not in goals:
         actions.append(Action("hacker", "scan", state.hacker_position, f"Scan {state.hacker_position}"))
-    for goal in goals[:1]:
-        actions.append(Action("hacker", "attack", goal, f"Attack {goal}"))
     return actions[:4]
 
 
@@ -154,30 +152,6 @@ def defender_actions(graph: NetworkGraph, state: GameState, goals: list[str]) ->
     actions: list[Action] = []
     for node_id in _rank_nodes_near_hacker(graph, state, goals)[:3]:
         actions.append(Action("defender", "block_node", node_id, f"Block {node_id}"))
-
-    edge_candidates: list[tuple[float, str, str]] = []
-    for edge in graph.get_all_edges():
-        if edge_key(edge.source, edge.target) in {edge_key(*item) for item in state.blocked_edges}:
-            continue
-        if edge.source in goals or edge.target in goals:
-            continue
-        probe = GameState(
-            hacker_position=state.hacker_position,
-            blocked_nodes=state.blocked_nodes,
-            blocked_edges=state.blocked_edges | frozenset([edge_key(edge.source, edge.target)]),
-            firewall_positions=state.firewall_positions,
-            ids_positions=state.ids_positions,
-            upgraded_nodes=state.upgraded_nodes,
-            detected=state.detected,
-            turn=state.turn,
-            remaining_turns=state.remaining_turns,
-            history=state.history,
-        )
-        if not has_goal_path(graph, probe, goals):
-            continue
-        edge_candidates.append((shortest_distance(graph, probe, state.hacker_position, goals), edge.source, edge.target))
-    for _, left, right in sorted(edge_candidates, reverse=True)[:1]:
-        actions.append(Action("defender", "block_edge", f"{left}|{right}", f"Block edge {left}-{right}"))
 
     if state.ids_positions:
         actions.append(Action("defender", "deploy_ids", state.ids_positions[0], f"Activate IDS at {state.ids_positions[0]}"))

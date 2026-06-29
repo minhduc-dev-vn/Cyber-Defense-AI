@@ -7,7 +7,7 @@ Ung dung mo phong cac thuat toan AI trong boi canh phong thu mang. Project dung 
 - Project da duoc cleanup: khong con `tools/`, `assets/`, `__pycache__/`, `.pytest_cache/`.
 - File `context.md` cua project da duoc gom ra file `../context.md` o workspace cha.
 - Thu muc `tests/` van duoc giu lai de kiem tra regression.
-- Lan kiem tra gan nhat: `79 passed, 1 warning`.
+- Lan kiem tra gan nhat: `80 passed`.
 
 ## Chuc nang chinh
 

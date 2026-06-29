@@ -108,8 +108,6 @@ class App:
         self._right_panel_scroll: int = 0
         self._right_panel_follow_tail: bool = True
         self._right_panel_node_id: Optional[str] = None
-        self._right_panel_scroll: int = 0
-        self._right_panel_scroll: int = 0
 
     def _load_map(self, map_name: str) -> bool:
         maps_dir = Path(__file__).parent.parent / "maps"
@@ -219,7 +217,7 @@ class App:
             return
         if action == "move":
             self._ensure_adversarial_game_state()
-            self._show_toast("Chá»n node ká» trÃªn báº£n Ä‘á»“ Ä‘á»ƒ Move")
+            self._show_toast("Chọn node kề trên bản đồ để Move")
             return
         self._execute_adversarial_turn(action)
 
@@ -1074,11 +1072,14 @@ class App:
         )
 
     def _metrics_from_step(self, step: StepEvent, success: bool) -> AlgorithmMetrics:
+        total_cost = step.total_cost
+        if step.data.get("local_search_mode") == "heuristic_path":
+            total_cost = float(step.data.get("path_cost", total_cost))
         return AlgorithmMetrics(
             algorithm=step.algorithm,
             success=success,
             path=list(step.path),
-            total_cost=step.total_cost,
+            total_cost=total_cost,
             nodes_expanded=step.nodes_expanded,
             nodes_generated=step.nodes_generated,
             max_frontier_size=step.max_frontier_size,
@@ -1451,38 +1452,6 @@ class App:
         self.screen.blit(bg, (box_x, box_y))
         pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, pygame.Rect(box_x, box_y, width + 24, height + 12), 1, border_radius=7)
         self.screen.blit(surf, (box_x + 12, box_y + 6))
-
-    def _handle_right_panel_event(self, event: pygame.event.Event) -> bool:
-        rect = self.layout.right_panel
-        if not rect.collidepoint(pygame.mouse.get_pos()):
-            return False
-        if event.type == pygame.MOUSEWHEEL:
-            self._right_panel_scroll = max(0, self._right_panel_scroll - event.y * 3)
-            self._right_panel_follow_tail = False
-            return True
-        return False
-
-    def _wrap_panel_text(self, text: str, font: pygame.font.Font, max_width: int) -> list[str]:
-        words = str(text).split(" ")
-        lines: list[str] = []
-        current = ""
-        for word in words:
-            candidate = word if not current else f"{current} {word}"
-            if font.size(candidate)[0] <= max_width:
-                current = candidate
-                continue
-            if current:
-                lines.append(current)
-            while font.size(word)[0] > max_width and len(word) > 1:
-                cut = len(word)
-                while cut > 1 and font.size(word[:cut])[0] > max_width:
-                    cut -= 1
-                lines.append(word[:cut])
-                word = word[cut:]
-            current = word
-        if current:
-            lines.append(current)
-        return lines or [""]
 
     def _draw_map_title(self) -> None:
         assert self._map_data is not None

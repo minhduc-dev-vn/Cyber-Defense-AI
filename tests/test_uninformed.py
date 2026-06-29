@@ -25,7 +25,7 @@ def make_linear_graph() -> NetworkGraph:
 
 
 def make_branch_graph() -> NetworkGraph:
-    """
+    r"""
          B - D
         /       \
     A           F (server)

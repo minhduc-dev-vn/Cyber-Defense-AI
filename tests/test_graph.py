@@ -58,7 +58,7 @@ class TestNetworkGraph:
     def test_has_path(self):
         g = make_simple_graph()
         assert g.has_path("A", "D")
-        assert not g.has_path("D", "A") or g.has_path("D", "A")  # bidirectional
+        assert g.has_path("D", "A")  # bidirectional
 
     def test_no_path_blocked(self):
         g = make_simple_graph()
@@ -68,6 +68,15 @@ class TestNetworkGraph:
                 edge.blocked = True
         # A không còn đường đến D
         assert not g.has_path("A", "D")
+
+    def test_has_path_can_include_blocked_edges(self):
+        g = make_simple_graph()
+        for edge in g.get_all_edges():
+            if "B" in (edge.source, edge.target):
+                edge.blocked = True
+
+        assert not g.has_path("A", "D", ignore_blocked=True)
+        assert g.has_path("A", "D", ignore_blocked=False)
 
     def test_heuristic_nonnegative(self):
         g = make_simple_graph()
