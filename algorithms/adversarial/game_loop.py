@@ -87,14 +87,10 @@ def choose_defender_action(
         return None, hacker_value(graph, state, goals), counters
 
     name = algorithm.lower()
-    if name == "alpha-beta":
+    if name in {"alpha-beta", "expectimax"}:
         from algorithms.adversarial.alpha_beta import _alpha_beta
 
         value, action = _alpha_beta(graph, state, goals, depth, -inf, inf, counters)
-    elif name == "expectimax":
-        from algorithms.adversarial.expectimax import _expectimax
-
-        value, action = _expectimax(graph, state, goals, depth, counters)
     else:
         from algorithms.adversarial.minimax import _minimax
 

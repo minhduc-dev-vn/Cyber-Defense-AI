@@ -95,7 +95,7 @@ class AppState:
     sa_max_steps: int = 1000
 
     # Minimax/Alpha-Beta/Expectimax params
-    game_depth: int = 3
+    game_depth: int = 5
 
     # Adversarial tab state
     adversarial_hacker_action: str = "move"

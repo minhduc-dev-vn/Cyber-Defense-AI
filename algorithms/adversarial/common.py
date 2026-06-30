@@ -110,6 +110,45 @@ def defender_value(graph: NetworkGraph, state: GameState, goals: list[str]) -> f
     return value
 
 
+def _state_with_blocked_node(state: GameState, node_id: str) -> GameState:
+    return GameState(
+        hacker_position=state.hacker_position,
+        blocked_nodes=state.blocked_nodes | frozenset([node_id]),
+        blocked_edges=state.blocked_edges,
+        firewall_positions=state.firewall_positions,
+        ids_positions=state.ids_positions,
+        upgraded_nodes=state.upgraded_nodes,
+        detected=state.detected,
+        turn=state.turn,
+        remaining_turns=state.remaining_turns,
+        history=state.history,
+    )
+
+
+def _state_with_blocked_edge(state: GameState, left: str, right: str) -> GameState:
+    return GameState(
+        hacker_position=state.hacker_position,
+        blocked_nodes=state.blocked_nodes,
+        blocked_edges=state.blocked_edges | frozenset([edge_key(left, right)]),
+        firewall_positions=state.firewall_positions,
+        ids_positions=state.ids_positions,
+        upgraded_nodes=state.upgraded_nodes,
+        detected=state.detected,
+        turn=state.turn,
+        remaining_turns=state.remaining_turns,
+        history=state.history,
+    )
+
+
+def _block_score(graph: NetworkGraph, state: GameState, goals: list[str], probe: GameState) -> tuple[float, float]:
+    if not has_goal_path(graph, probe, goals):
+        return (2.0, inf)
+    current_distance = shortest_distance(graph, state, state.hacker_position, goals)
+    blocked_distance = shortest_distance(graph, probe, probe.hacker_position, goals)
+    improvement = max(0.0, blocked_distance - current_distance)
+    return (1.0 if improvement > 0 else 0.0, blocked_distance)
+
+
 def _rank_nodes_near_hacker(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[str]:
     excluded = set(goals) | {state.hacker_position} | set(state.blocked_nodes)
     candidates = [
@@ -118,25 +157,34 @@ def _rank_nodes_near_hacker(graph: NetworkGraph, state: GameState, goals: list[s
         if node.id not in excluded and node.kind not in ("server", "database")
     ]
 
-    def rank(node_id: str) -> tuple[float, str]:
-        probe = GameState(
-            hacker_position=state.hacker_position,
-            blocked_nodes=state.blocked_nodes | frozenset([node_id]),
-            blocked_edges=state.blocked_edges,
-            firewall_positions=state.firewall_positions,
-            ids_positions=state.ids_positions,
-            upgraded_nodes=state.upgraded_nodes,
-            detected=state.detected,
-            turn=state.turn,
-            remaining_turns=state.remaining_turns,
-            history=state.history,
-        )
-        if not has_goal_path(graph, probe, goals):
-            return (-1, node_id)
-        return (shortest_distance(graph, probe, state.hacker_position, goals), node_id)
+    def rank(node_id: str) -> tuple[float, float, int, int, str]:
+        probe = _state_with_blocked_node(state, node_id)
+        severity, distance = _block_score(graph, state, goals, probe)
+        is_next_hop = 1 if node_id in active_neighbors(graph, state, state.hacker_position) else 0
+        degree = len(graph.neighbors(node_id, ignore_blocked=True))
+        return (severity, distance, is_next_hop, degree, node_id)
 
     ranked = sorted((rank(node_id) for node_id in candidates), reverse=True)
-    return [node_id for score, node_id in ranked if score >= 0]
+    return [node_id for *_score, node_id in ranked]
+
+
+def _rank_edges_near_hacker(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[tuple[str, str]]:
+    blocked = {edge_key(*item) for item in state.blocked_edges}
+    candidates: set[tuple[str, str]] = set()
+    for node in graph.get_all_nodes():
+        for neighbor in graph.neighbors(node.id, ignore_blocked=True):
+            key = edge_key(node.id, neighbor)
+            if key not in blocked:
+                candidates.add(key)
+
+    def rank(edge: tuple[str, str]) -> tuple[float, float, int, str]:
+        left, right = edge
+        probe = _state_with_blocked_edge(state, left, right)
+        severity, distance = _block_score(graph, state, goals, probe)
+        touches_hacker = 1 if state.hacker_position in edge else 0
+        return (severity, distance, touches_hacker, "|".join(edge))
+
+    return sorted(candidates, key=rank, reverse=True)
 
 
 def hacker_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[Action]:
@@ -150,16 +198,19 @@ def hacker_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> l
 
 def defender_actions(graph: NetworkGraph, state: GameState, goals: list[str]) -> list[Action]:
     actions: list[Action] = []
-    for node_id in _rank_nodes_near_hacker(graph, state, goals)[:3]:
+    for node_id in _rank_nodes_near_hacker(graph, state, goals)[:4]:
         actions.append(Action("defender", "block_node", node_id, f"Block {node_id}"))
 
-    if state.ids_positions:
+    for left, right in _rank_edges_near_hacker(graph, state, goals)[:2]:
+        actions.append(Action("defender", "block_edge", f"{left}|{right}", f"Block edge {left}-{right}"))
+
+    if state.ids_positions and not state.detected:
         actions.append(Action("defender", "deploy_ids", state.ids_positions[0], f"Activate IDS at {state.ids_positions[0]}"))
-    else:
+    elif not state.ids_positions:
         for node_id in _rank_nodes_near_hacker(graph, state, goals):
             actions.append(Action("defender", "upgrade", node_id, f"Upgrade {node_id}"))
             break
-    return actions[:4]
+    return actions[:6]
 
 
 def apply_action(
